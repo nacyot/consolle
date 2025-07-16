@@ -114,6 +114,11 @@ module Consolle
             
             # Parse and return result
             result = parse_output(output, eval_command)
+            
+            # Log for debugging object output issues
+            logger.debug "[ConsoleSupervisor] Raw output: #{output.inspect}"
+            logger.debug "[ConsoleSupervisor] Parsed result: #{result.inspect}"
+            
             { success: true, output: result, execution_time: nil }
           rescue StandardError => e
             logger.error "[ConsoleSupervisor] Eval error: #{e.message}"
@@ -359,45 +364,52 @@ module Consolle
         # Remove ANSI codes
         clean = strip_ansi(output)
         
-        # Debug logging for multiline code
-        if code.include?("\n")
-          logger.debug "[parse_output] Multiline code detected"
-          logger.debug "[parse_output] Raw output: #{output.inspect}"
-          logger.debug "[parse_output] Clean output: #{clean.inspect}"
-        end
+        logger.debug "[parse_output] Code: #{code.inspect}"
+        logger.debug "[parse_output] Clean output: #{clean.inspect}"
         
-        # Remove the echoed command and prompts
+        # Split into lines
         lines = clean.lines
         result_lines = []
-        
-        # For multiline code, we need to skip all input lines
-        code_lines = code.lines.map(&:strip)
-        skip_count = code_lines.length
-        skipped = 0
+        skip_echo = true
         
         lines.each_with_index do |line, idx|
-          # Skip input echo lines
-          if skipped < skip_count && line.strip == code_lines[skipped]
-            skipped += 1
-            logger.debug "[parse_output] Skipping input echo at line #{idx}: #{line.inspect}" if code.include?("\n")
+          # Skip the eval command echo
+          if skip_echo && line.include?("eval(File.read")
+            logger.debug "[parse_output] Skipping eval echo at line #{idx}: #{line.inspect}"
+            skip_echo = false
+            next
+          end
+          
+          # Check if this is a return value (starts with "=> ")
+          if line.start_with?("=> ")
+            logger.debug "[parse_output] Found return value at line #{idx}: #{line.inspect}"
+            result_lines << line
             next
           end
           
           # Skip prompts
           if line.match?(PROMPT_PATTERN)
-            logger.debug "[parse_output] Skipping prompt at line #{idx}: #{line.inspect}" if code.include?("\n")
+            logger.debug "[parse_output] Skipping prompt at line #{idx}: #{line.inspect}"
             next
           end
           
-          # Collect output lines after we've skipped all input echoes
-          if skipped >= skip_count
-            result_lines << line
-            logger.debug "[parse_output] Collecting output line #{idx}: #{line.inspect}" if code.include?("\n")
-          end
+          # Collect all other lines
+          result_lines << line
+          logger.debug "[parse_output] Collecting line #{idx}: #{line.inspect}"
         end
         
-        result = result_lines.join.strip
-        logger.debug "[parse_output] Final result: #{result.inspect}" if code.include?("\n")
+        # Join all lines and look for the return value pattern
+        full_output = result_lines.join
+        
+        # Extract the return value (everything after "=> ")
+        if full_output =~ /^=> (.+)$/m
+          result = $1.strip
+        else
+          # If no return pattern found, return all collected output
+          result = full_output.strip
+        end
+        
+        logger.debug "[parse_output] Final result: #{result.inspect}"
         result
       end
 
