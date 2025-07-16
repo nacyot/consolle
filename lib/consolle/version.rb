@@ -1,5 +1,5 @@
 # frozen_string_literal: true
 
 module Consolle
-  VERSION = "0.1.0"
+  VERSION = File.read(File.expand_path("../../../.version", __FILE__)).strip
 end
