@@ -6,11 +6,11 @@ Gem::Specification.new do |spec|
   spec.name          = "consolle"
   spec.version       = Consolle::VERSION
   spec.authors       = ["nacyot"]
-  spec.email         = ["nacyot@gmail.com"]
+  spec.email         = ["propellerheaven@gmail.com"]
 
   spec.summary       = "PTY-based Rails console management library"
   spec.description   = "Consolle is a library that manages Rails console through PTY (Pseudo-Terminal). Moving away from the traditional eval-based execution method, it manages the actual Rails console process as a subprocess to provide a more stable and secure execution environment."
-  spec.homepage      = "https://github.com/nacyot/consolle"
+  spec.homepage      = "https://consolle.nacyot.com"
   spec.required_ruby_version = ">= 3.0.0"
 
   spec.metadata["allowed_push_host"] = "https://rubygems.pkg.github.com/nacyot"
