@@ -14,7 +14,7 @@ module Consolle
       MAX_RESTARTS = 5   # within 5 minutes
       RESTART_WINDOW = 300  # 5 minutes
       # Match various Rails console prompts
-      PROMPT_PATTERN = /(\]>|>>|>\s*|irb\([^)]+\):[\d]+:\d+[>*]\s*)$/
+      PROMPT_PATTERN = /^(\u001E\u001F<CONSOLLE>\u001F\u001E|\w+[-_]?\w*\([^)]*\)>)\s*$/
       CTRL_C = "\x03"
 
       def initialize(rails_root:, rails_env: "development", logger: nil)
@@ -307,12 +307,15 @@ module Consolle
       end
 
       def configure_irb_for_automation
+        # Create the invisible-wrapper sentinel prompt
+        sentinel_prompt = "\u001E\u001F<CONSOLLE>\u001F\u001E "
+        
         # Send IRB configuration commands to disable interactive features
         irb_commands = [
           # Configure custom prompt mode to eliminate continuation prompts
           "IRB.conf[:PROMPT][:CONSOLLE] = { " \
             "AUTO_INDENT: false, " \
-            "PROMPT_I: 'lua-home(dev)> ', " \
+            "PROMPT_I: #{sentinel_prompt.inspect}, " \
             "PROMPT_N: '', " \
             "PROMPT_S: '', " \
             "PROMPT_C: '', " \
@@ -355,7 +358,7 @@ module Consolle
           .gsub(/\e\[[\d;]*[a-zA-Z]/, "")  # Standard ANSI codes
           .gsub(/\e\[\?[\d]+[hl]/, "")     # Private mode codes like [?2004h
           .gsub(/\e[<>=]/, "")             # Other escape sequences
-          .gsub(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/, "")  # Control chars except \t(09) \n(0A) \r(0D)
+          .gsub(/[\x00-\x08\x0B-\x0C\x0E-\x1D\x7F]/, "")  # Control chars except \t(09) \n(0A) \r(0D) \u001E(1E) \u001F(1F)
           .gsub(/\r\n/, "\n")              # Normalize line endings
       end
       
@@ -363,9 +366,6 @@ module Consolle
       def parse_output(output, code)
         # Remove ANSI codes
         clean = strip_ansi(output)
-        
-        logger.debug "[parse_output] Code: #{code.inspect}"
-        logger.debug "[parse_output] Clean output: #{clean.inspect}"
         
         # Split into lines
         lines = clean.lines
@@ -375,41 +375,22 @@ module Consolle
         lines.each_with_index do |line, idx|
           # Skip the eval command echo
           if skip_echo && line.include?("eval(File.read")
-            logger.debug "[parse_output] Skipping eval echo at line #{idx}: #{line.inspect}"
             skip_echo = false
             next
           end
           
-          # Check if this is a return value (starts with "=> ")
-          if line.start_with?("=> ")
-            logger.debug "[parse_output] Found return value at line #{idx}: #{line.inspect}"
-            result_lines << line
-            next
-          end
-          
-          # Skip prompts
+          # Skip prompts (but not at the end - we handle that separately)
           if line.match?(PROMPT_PATTERN)
-            logger.debug "[parse_output] Skipping prompt at line #{idx}: #{line.inspect}"
             next
           end
           
-          # Collect all other lines
+          # Collect all other lines (including return values and side effects)
           result_lines << line
-          logger.debug "[parse_output] Collecting line #{idx}: #{line.inspect}"
         end
         
-        # Join all lines and look for the return value pattern
-        full_output = result_lines.join
+        # Join all lines - this includes both side effects and return values
+        result = result_lines.join.strip
         
-        # Extract the return value (everything after "=> ")
-        if full_output =~ /^=> (.+)$/m
-          result = $1.strip
-        else
-          # If no return pattern found, return all collected output
-          result = full_output.strip
-        end
-        
-        logger.debug "[parse_output] Final result: #{result.inspect}"
         result
       end
 
