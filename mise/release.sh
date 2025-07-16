@@ -90,9 +90,16 @@ if gem build consolle.gemspec; then
     git push origin
     git push origin "v$NEW_VERSION"
     
-    echo "Release complete!"
-    echo "To publish to GitHub Packages, run:"
-    echo "  gem push --key github --host https://rubygems.pkg.github.com/nacyot consolle-$NEW_VERSION.gem"
+    echo "Publishing to GitHub Packages..."
+    if gem push --key github --host https://rubygems.pkg.github.com/nacyot consolle-$NEW_VERSION.gem; then
+        echo "✓ Gem published successfully to GitHub Packages"
+        echo "Release complete!"
+        echo "Version $NEW_VERSION has been released and published."
+    else
+        echo "Warning: Git operations succeeded but gem push failed"
+        echo "You can manually publish with:"
+        echo "  gem push --key github --host https://rubygems.pkg.github.com/nacyot consolle-$NEW_VERSION.gem"
+    fi
 else
     echo "Error: Gem build failed with new version"
     # Revert version change
