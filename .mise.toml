@@ -1,0 +1,5 @@
+[tools]
+ruby = "3.4.1"
+
+[env]
+_.file = [".env", ".env.local"]
