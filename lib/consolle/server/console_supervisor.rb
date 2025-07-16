@@ -15,7 +15,7 @@ module Consolle
       RESTART_WINDOW = 300  # 5 minutes
       # Match various Rails console prompts
       # Match various console prompts: custom sentinel, Rails app prompts, IRB prompts, and generic prompts
-      PROMPT_PATTERN = /^(\u001E\u001F<CONSOLLE>\u001F\u001E|\w+[-_]?\w*\([^)]*\)>|irb\([^)]+\):[\d]+:\d+[>*]|>>|>)\s*$/
+      PROMPT_PATTERN = /^(\u001E\u001F<CONSOLLE>\u001F\u001E|\w+[-_]?\w*\([^)]*\)>|irb\([^)]+\):[\d]+:?[\d]*[>*]|>>|>)\s*$/
       CTRL_C = "\x03"
 
       def initialize(rails_root:, rails_env: "development", logger: nil)
@@ -217,10 +217,14 @@ module Consolle
         trim_restart_history
         
         # Wait for initial prompt
-        wait_for_prompt(timeout: 10)
+        wait_for_prompt(timeout: 15)
         
         # Configure IRB settings for automation
         configure_irb_for_automation
+        
+        # Wait for the new prompt to be applied
+        sleep 0.5
+        clear_buffer
         
         logger.info "[ConsoleSupervisor] Rails console started (PID: #{@pid})"
       rescue StandardError => e
