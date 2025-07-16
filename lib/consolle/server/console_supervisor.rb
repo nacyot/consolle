@@ -174,6 +174,9 @@ module Consolle
           # Skip IRB configuration file (prevent conflicts with existing settings)
           "IRBRC" => "skip",
           
+          # Disable pry-rails (force IRB instead of Pry)
+          "DISABLE_PRY_RAILS" => "1",
+          
           # Completely disable pager
           "PAGER" => "cat",           # Set pager to cat (immediate output)
           "NO_PAGER" => "1",          # Pager disable flag
