@@ -14,7 +14,8 @@ module Consolle
       MAX_RESTARTS = 5   # within 5 minutes
       RESTART_WINDOW = 300  # 5 minutes
       # Match various Rails console prompts
-      PROMPT_PATTERN = /^(\u001E\u001F<CONSOLLE>\u001F\u001E|\w+[-_]?\w*\([^)]*\)>)\s*$/
+      # Match various console prompts: custom sentinel, Rails app prompts, IRB prompts, and generic prompts
+      PROMPT_PATTERN = /^(\u001E\u001F<CONSOLLE>\u001F\u001E|\w+[-_]?\w*\([^)]*\)>|irb\([^)]+\):[\d]+:\d+[>*]|>>|>)\s*$/
       CTRL_C = "\x03"
 
       def initialize(rails_root:, rails_env: "development", logger: nil)
@@ -268,7 +269,7 @@ module Consolle
         end
       end
 
-      def wait_for_prompt(timeout: 5)
+      def wait_for_prompt(timeout: 15)
         output = +""
         deadline = Time.now + timeout
         
@@ -285,9 +286,12 @@ module Consolle
             logger.debug "[ConsoleSupervisor] Got chunk: #{chunk.inspect}"
             
             clean = strip_ansi(output)
-            if clean.match?(PROMPT_PATTERN)
-              logger.info "[ConsoleSupervisor] Found prompt!"
-              return true
+            # Check each line for prompt pattern
+            clean.lines.each do |line|
+              if line.match?(PROMPT_PATTERN)
+                logger.info "[ConsoleSupervisor] Found prompt!"
+                return true
+              end
             end
           rescue IO::WaitReadable
             IO.select([@reader], nil, nil, 0.1)
