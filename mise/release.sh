@@ -21,6 +21,10 @@ if [ -n "$(git status --porcelain)" ]; then
     exit 1
 fi
 
+# Clean up old gem files
+echo "Cleaning up old gem files..."
+rm -f consolle-*.gem
+
 # Read current version from .version file
 if [ ! -f .version ]; then
     echo "Error: .version file not found"
@@ -67,8 +71,7 @@ if ! gem build consolle.gemspec; then
 fi
 echo "Build test successful"
 
-# Clean up test build
-rm -f consolle-$CURRENT_VERSION.gem
+# Test build gem is already cleaned up by initial cleanup
 
 # Update .version file
 echo "$NEW_VERSION" > .version
