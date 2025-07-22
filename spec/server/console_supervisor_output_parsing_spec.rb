@@ -2,6 +2,7 @@
 
 require "spec_helper"
 require "consolle/server/console_supervisor"
+require "base64"
 
 RSpec.describe Consolle::Server::ConsoleSupervisor do
   let(:logger) { Logger.new(nil) }
@@ -19,8 +20,9 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
     end
 
     def mock_console_output(code, result)
-      # Mock typical IRB output format with eval command
-      eval_cmd = "eval(File.read('/tmp/consolle_eval.rb'), IRB.CurrentContext.workspace.binding)"
+      # Mock typical IRB output format with Base64 eval command
+      encoded_code = Base64.strict_encode64(code)
+      eval_cmd = "eval(Base64.decode64('#{encoded_code}'), IRB.CurrentContext.workspace.binding)"
       "#{eval_cmd}\n=> #{result}\n\u001E\u001F<CONSOLLE>\u001F\u001E "
     end
 
