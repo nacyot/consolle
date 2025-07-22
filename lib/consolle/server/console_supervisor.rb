@@ -15,7 +15,8 @@ module Consolle
       RESTART_WINDOW = 300  # 5 minutes
       # Match various Rails console prompts
       # Match various console prompts: custom sentinel, Rails app prompts, IRB prompts, and generic prompts
-      PROMPT_PATTERN = /^(\u001E\u001F<CONSOLLE>\u001F\u001E|\w+[-_]?\w*\([^)]*\)>|irb\([^)]+\):[\d]+:?[\d]*[>*]|>>|>)\s*$/
+      # Allow optional characters before the prompt (e.g., Unicode symbols like ▽)
+      PROMPT_PATTERN = /^.*?(\u001E\u001F<CONSOLLE>\u001F\u001E|\w+[-_]?\w*\([^)]*\)>|irb\([^)]+\):[\d]+:?[\d]*[>*]|>>|>)\s*$/
       CTRL_C = "\x03"
 
       def initialize(rails_root:, rails_env: "development", logger: nil, command: nil)
