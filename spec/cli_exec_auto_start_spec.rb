@@ -11,6 +11,7 @@ RSpec.describe Consolle::CLI do
     
     before do
       allow(cli).to receive(:ensure_rails_project!)
+      allow(cli).to receive(:ensure_project_directories)
       allow(cli).to receive(:project_socket_path).and_return(socket_path)
       allow(cli).to receive(:session_file_path).and_return("/tmp/cone/session.json")
       allow(Dir).to receive(:pwd).and_return("/test")
