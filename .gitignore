@@ -2,3 +2,5 @@
 tmp/
 .gem/
 *.gem
+.notes/
+cone-examples.md
