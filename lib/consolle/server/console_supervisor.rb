@@ -48,8 +48,27 @@ module Consolle
         @mutex.synchronize do
           raise "Console is not running" unless running?
           
-          # Clear any pending output to ensure clean state
-          clear_buffer
+          # Check if this is a remote console
+          is_remote = @command.include?("ssh") || @command.include?("kamal") || @command.include?("docker")
+          
+          if is_remote
+            # Send Ctrl-C to ensure clean state before execution
+            @writer.write(CTRL_C)
+            @writer.flush
+            
+            # Clear any pending output
+            clear_buffer
+            
+            # Wait for prompt after Ctrl-C
+            begin
+              wait_for_prompt(timeout: 1, consume_all: true)
+            rescue Timeout::Error
+              # Continue anyway, some consoles may not show prompt immediately
+            end
+          else
+            # For local consoles, just clear buffer
+            clear_buffer
+          end
           
           # Encode code using Base64 to handle special characters and remote consoles
           encoded_code = Base64.strict_encode64(code)
@@ -210,21 +229,56 @@ module Consolle
         # Configure IRB settings for automation
         configure_irb_for_automation
         
-        # Send a dummy command to ensure all configuration output is flushed
-        # This helps prevent configuration output from appearing in the first exec
-        @writer.puts "nil"
-        @writer.flush
+        # For remote consoles (like kamal), we need more aggressive initialization
+        # Check if this looks like a remote console based on the command
+        is_remote = @command.include?("ssh") || @command.include?("kamal") || @command.include?("docker")
         
-        # Wait for the dummy command to complete and consume all output
-        begin
-          wait_for_prompt(timeout: 2, consume_all: true)
-        rescue Timeout::Error
-          logger.warn "[ConsoleSupervisor] No prompt after dummy command, continuing anyway"
+        if is_remote
+          # Send Ctrl-C to ensure clean state
+          @writer.write(CTRL_C)
+          @writer.flush
+          
+          # Wait for prompt after Ctrl-C
+          begin
+            wait_for_prompt(timeout: 2, consume_all: true)
+          rescue Timeout::Error
+            logger.warn "[ConsoleSupervisor] No prompt after Ctrl-C, continuing anyway"
+          end
+          
+          # Send a unique marker command to ensure all initialization output is consumed
+          marker = "__consolle_init_#{Time.now.to_f}__"
+          @writer.puts "puts '#{marker}'"
+          @writer.flush
+          
+          # Read until we see our marker
+          output = +""
+          deadline = Time.now + 3
+          marker_found = false
+          
+          while Time.now < deadline && !marker_found
+            begin
+              chunk = @reader.read_nonblock(4096)
+              output << chunk
+              marker_found = output.include?(marker)
+            rescue IO::WaitReadable
+              IO.select([@reader], nil, nil, 0.1)
+            rescue Errno::EIO
+              IO.select([@reader], nil, nil, 0.1)
+            end
+          end
+          
+          unless marker_found
+            logger.warn "[ConsoleSupervisor] Initialization marker not found, continuing anyway"
+          end
+          
+          # Final cleanup for remote consoles
+          @writer.write(CTRL_C)
+          @writer.flush
+          clear_buffer
+        else
+          # For local consoles, minimal cleanup is sufficient
+          clear_buffer
         end
-        
-        # Clear buffer to ensure it's completely empty
-        sleep 0.2
-        clear_buffer
         
         logger.info "[ConsoleSupervisor] Rails console started (PID: #{@pid})"
       rescue StandardError => e
@@ -289,8 +343,8 @@ module Consolle
           
           # If we found prompt and consume_all is true, continue reading for a bit more
           if prompt_found && consume_all
-            if Time.now - last_data_time > 0.3
-              logger.info "[ConsoleSupervisor] No more data for 0.3s after prompt, stopping"
+            if Time.now - last_data_time > 0.5
+              logger.info "[ConsoleSupervisor] No more data for 0.5s after prompt, stopping"
               return true
             end
           elsif prompt_found
@@ -321,8 +375,8 @@ module Consolle
       end
 
       def clear_buffer
-        # Try to clear buffer with minimal delay
-        2.times do |i|
+        # Try to clear buffer multiple times for remote consoles
+        3.times do |i|
           begin
             loop do
               @reader.read_nonblock(4096)
@@ -330,7 +384,7 @@ module Consolle
           rescue IO::WaitReadable, Errno::EIO
             # Buffer cleared for this iteration
           end
-          sleep 0.02 if i == 0  # Only sleep after first iteration
+          sleep 0.05 if i < 2  # Sleep between iterations except the last
         end
       end
 
@@ -427,6 +481,14 @@ module Consolle
           
           # Skip prompts (but not return values that start with =>)
           if line.match?(PROMPT_PATTERN) && !line.start_with?("=>")
+            next
+          end
+          
+          # Skip common IRB configuration output patterns
+          if line.match?(/^(IRB\.conf|DISABLE_PRY_RAILS|Switch to inspect mode|Loading .*\.rb|nil)$/) ||
+             line.match?(/^__consolle_init_[\d.]+__$/) ||
+             line.match?(/^'consolle_init'$/) ||
+             line.strip == "false" && idx == 0  # Skip leading false from IRB config
             next
           end
           

@@ -24,6 +24,7 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
     allow(reader).to receive(:close)
     allow(writer).to receive(:close)
     allow(writer).to receive(:puts)  # For all puts calls
+    allow(writer).to receive(:write)  # For Ctrl-C and other write calls
     allow(writer).to receive(:flush)  # For all flush calls
     
     # Create a proper exception for IO::WaitReadable
@@ -136,7 +137,8 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
       
       result = supervisor.eval("loop { }", timeout: 0.1)
       
-      expect(writer).to have_received(:write).with("\x03")
+      # Expect Ctrl-C to be sent at least once on timeout
+      expect(writer).to have_received(:write).with("\x03").at_least(:once)
       expect(result[:success]).to be false
       expect(result[:output]).to include("timed out")
     end

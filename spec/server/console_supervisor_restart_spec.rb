@@ -21,6 +21,7 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
     allow(@reader).to receive(:close)
     allow(@writer).to receive(:close)
     allow(@writer).to receive(:puts)
+    allow(@writer).to receive(:write)
     allow(@writer).to receive(:flush)
     
     # Create a proper exception for IO::WaitReadable
@@ -52,6 +53,7 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
         allow(new_reader).to receive(:close)
         allow(new_writer).to receive(:close)
         allow(new_writer).to receive(:puts)
+        allow(new_writer).to receive(:write)
         allow(new_writer).to receive(:flush)
         allow(new_reader).to receive(:read_nonblock).and_raise(wait_readable_error)
         [new_reader, new_writer, @new_pid]

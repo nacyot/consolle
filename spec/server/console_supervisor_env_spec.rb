@@ -27,6 +27,7 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
         allow(reader).to receive(:close)
         allow(writer).to receive(:close)
         allow(writer).to receive(:puts)
+        allow(writer).to receive(:write)
         allow(writer).to receive(:flush)
         
         wait_readable_error = Class.new(StandardError) { include IO::WaitReadable }.new
