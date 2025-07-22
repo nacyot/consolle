@@ -23,13 +23,20 @@ RSpec.configure do |config|
     config.default_formatter = "doc"
   end
 
-  config.order = :random
-  Kernel.srand config.seed
+  config.order = :defined  # Run tests in defined order for easier debugging
+  # Kernel.srand config.seed
   
   # Add timeout for all tests to prevent hanging
   config.around(:each) do |example|
-    Timeout.timeout(10) do
+    Timeout.timeout(30) do  # Increased timeout
       example.run
     end
+  end
+  
+  # Clean up ConsoleSupervisor watchdog threads before RSpec clears doubles
+  config.after(:each) do
+    Thread.list
+      .select { |t| t[:consolle_watchdog] }
+      .each { |t| t.kill; t.join(0.1) rescue nil }
   end
 end

@@ -23,6 +23,8 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
     allow(reader).to receive(:fcntl)
     allow(reader).to receive(:close)
     allow(writer).to receive(:close)
+    allow(writer).to receive(:puts).with("exit")  # For stop_console method
+    allow(writer).to receive(:flush)  # For stop_console method
     
     # Create a proper exception for IO::WaitReadable
     wait_readable_error = Class.new(StandardError) { include IO::WaitReadable }.new
@@ -45,6 +47,11 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
     
     # Create supervisor after mocking is set up
     @supervisor = described_class.new(rails_root: rails_root, logger: logger)
+  end
+  
+  after do
+    # Stop the supervisor (watchdog threads are now cleaned up globally in spec_helper)
+    @supervisor&.stop rescue nil
   end
   
   let(:supervisor) { @supervisor }

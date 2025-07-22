@@ -45,6 +45,7 @@ module Consolle
 
     desc "start", "Start Rails console in background"
     method_option :rails_env, type: :string, aliases: "-e", desc: "Rails environment", default: "development"
+    method_option :command, type: :string, aliases: "-c", desc: "Custom console command", default: "bin/rails console"
     def start
       ensure_rails_project!
       ensure_project_directories
@@ -71,7 +72,7 @@ module Consolle
         clear_session_info
       end
       
-      adapter = create_rails_adapter(options[:rails_env], options[:target])
+      adapter = create_rails_adapter(options[:rails_env], options[:target], options[:command])
 
       puts "Starting Rails console..."
       
@@ -287,6 +288,23 @@ module Consolle
       ensure_project_directories
       validate_session_name!(options[:target])
       
+      # Handle code input from file or arguments first
+      code = if options[:file]
+        path = File.expand_path(options[:file])
+        unless File.file?(path)
+          puts "Error: File not found: #{path}"
+          exit 1
+        end
+        File.read(path, mode: "r:UTF-8")
+      else
+        code_parts.join(" ")
+      end
+
+      if code.strip.empty?
+        puts "Error: No code provided (pass CODE or use -f FILE)"
+        exit 1
+      end
+      
       session_info = load_session_info
       server_running = false
       
@@ -328,23 +346,6 @@ module Consolle
           puts "Failed to start Rails console"
           exit 1
         end
-      end
-
-      # Handle code input from file or arguments
-      code = if options[:file]
-        path = File.expand_path(options[:file])
-        unless File.file?(path)
-          puts "Error: File not found: #{path}"
-          exit 1
-        end
-        File.read(path, mode: "r:UTF-8")
-      else
-        code_parts.join(" ")
-      end
-
-      if code.strip.empty?
-        puts "Error: No code provided (pass CODE or use -f FILE)"
-        exit 1
       end
 
       # Apply Claude Code escape fix unless --raw option is specified
@@ -445,7 +446,7 @@ module Consolle
       File.join(Dir.pwd, "tmp", "cone", "sessions.json")
     end
 
-    def create_rails_adapter(rails_env = "development", target = nil)
+    def create_rails_adapter(rails_env = "development", target = nil, command = nil)
       target ||= options[:target]
       
       Consolle::Adapters::RailsConsole.new(
@@ -454,7 +455,8 @@ module Consolle
         log_path: project_log_path(target),
         rails_root: Dir.pwd,
         rails_env: rails_env,
-        verbose: options[:verbose]
+        verbose: options[:verbose],
+        command: command
       )
     end
 

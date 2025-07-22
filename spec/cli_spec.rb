@@ -13,7 +13,7 @@ RSpec.describe Consolle::CLI do
   describe "Rails project validation" do
     it "raises an error if not a Rails project" do
       allow(File).to receive(:exist?).with("config/environment.rb").and_return(false)
-      allow(File).to receive(:exist?).with("Gemfile").and_return(false)
+      allow(File).to receive(:exist?).with("config/application.rb").and_return(false)
 
       cli = described_class.new
       expect { cli.send(:ensure_rails_project!) }.to raise_error(SystemExit)

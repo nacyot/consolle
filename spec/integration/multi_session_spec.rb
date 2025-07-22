@@ -47,7 +47,7 @@ RSpec.describe "Multi-session integration tests" do
       # Start default session
       cli = Consolle::CLI.new
       cli.options = { target: "cone", rails_env: "development", verbose: false }
-      allow(cli).to receive(:create_rails_adapter).with("development", "cone").and_return(adapter_cone)
+      allow(cli).to receive(:create_rails_adapter).with("development", "cone", nil).and_return(adapter_cone)
       allow(cli).to receive(:load_session_info).and_return(nil)
       allow(cli).to receive(:log_session_event)
       
@@ -56,7 +56,7 @@ RSpec.describe "Multi-session integration tests" do
       # Start dev session
       cli2 = Consolle::CLI.new  
       cli2.options = { target: "dev", rails_env: "development", verbose: false }
-      allow(cli2).to receive(:create_rails_adapter).with("development", "dev").and_return(adapter_dev)
+      allow(cli2).to receive(:create_rails_adapter).with("development", "dev", nil).and_return(adapter_dev)
       allow(cli2).to receive(:load_session_info).and_return(nil)
       allow(cli2).to receive(:log_session_event)
       
@@ -89,6 +89,28 @@ RSpec.describe "Multi-session integration tests" do
     it "executes code on the correct target session" do
       cli = Consolle::CLI.new
       cli.options = { target: "dev", timeout: 15, verbose: false, raw: false }
+      
+      # Mock Rails project checks
+      allow(cli).to receive(:ensure_rails_project!)
+      allow(cli).to receive(:ensure_project_directories)
+      allow(cli).to receive(:validate_session_name!)
+      
+      # Mock load_session_info to return the dev session info
+      session_info = {
+        socket_path: File.join(test_dir, "tmp/cone/dev.socket"),
+        process_pid: 67890,
+        started_at: Time.now.to_f,
+        rails_root: test_dir
+      }
+      allow(cli).to receive(:load_session_info).and_return(session_info)
+      
+      # Mock the socket connection check that happens in exec to verify server is running
+      mock_socket = double("socket")
+      allow(UNIXSocket).to receive(:new).with(File.join(test_dir, "tmp/cone/dev.socket")).and_return(mock_socket)
+      allow(mock_socket).to receive(:write)
+      allow(mock_socket).to receive(:flush)
+      allow(mock_socket).to receive(:gets).and_return('{"success":true,"running":true}')
+      allow(mock_socket).to receive(:close)
       
       # Mock socket connection to dev session
       allow(cli).to receive(:send_code_to_socket).with(

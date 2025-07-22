@@ -18,9 +18,10 @@ module Consolle
       PROMPT_PATTERN = /^(\u001E\u001F<CONSOLLE>\u001F\u001E|\w+[-_]?\w*\([^)]*\)>|irb\([^)]+\):[\d]+:?[\d]*[>*]|>>|>)\s*$/
       CTRL_C = "\x03"
 
-      def initialize(rails_root:, rails_env: "development", logger: nil)
+      def initialize(rails_root:, rails_env: "development", logger: nil, command: nil)
         @rails_root = rails_root
         @rails_env = rails_env
+        @command = command || "bin/rails console"
         @logger = logger || Logger.new(STDOUT)
         @pid = nil
         @reader = nil
@@ -199,11 +200,9 @@ module Consolle
           "COLUMNS" => "120",         # Fixed column count (prevent auto-detection)
           "LINES" => "24"             # Fixed line count (prevent auto-detection)
         }
-        cmd = "bin/rails console"
+        logger.info "[ConsoleSupervisor] Spawning console with command: #{@command} (#{@rails_env})"
         
-        logger.info "[ConsoleSupervisor] Spawning Rails console (#{@rails_env})"
-        
-        @reader, @writer, @pid = PTY.spawn(env, cmd, chdir: @rails_root)
+        @reader, @writer, @pid = PTY.spawn(env, @command, chdir: @rails_root)
         
         # Non-blocking mode
         @reader.sync = @writer.sync = true
@@ -234,6 +233,7 @@ module Consolle
 
       def start_watchdog
         @watchdog_thread = Thread.new do
+          Thread.current[:consolle_watchdog] = true  # Tag thread for test cleanup
           while @running
             begin
               sleep 0.5

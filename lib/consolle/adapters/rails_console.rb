@@ -11,13 +11,14 @@ module Consolle
     class RailsConsole
       attr_reader :socket_path, :process_pid, :pid_path, :log_path
 
-      def initialize(socket_path: nil, pid_path: nil, log_path: nil, rails_root: nil, rails_env: nil, verbose: false)
+      def initialize(socket_path: nil, pid_path: nil, log_path: nil, rails_root: nil, rails_env: nil, verbose: false, command: nil)
         @socket_path = socket_path || default_socket_path
         @pid_path = pid_path || default_pid_path
         @log_path = log_path || default_log_path
         @rails_root = rails_root || Dir.pwd
         @rails_env = rails_env || "development"
         @verbose = verbose
+        @command = command || "bin/rails console"
         @server_pid = nil
       end
 
@@ -145,7 +146,8 @@ module Consolle
           @rails_env,
           @verbose ? "debug" : "info",
           @pid_path,
-          @log_path
+          @log_path,
+          @command
         ]
       end
 
@@ -155,7 +157,7 @@ module Consolle
             require 'consolle/server/console_socket_server'
             require 'logger'
             
-            socket_path, rails_root, rails_env, log_level, pid_path, log_path = ARGV
+            socket_path, rails_root, rails_env, log_level, pid_path, log_path, command = ARGV
             
             # Write initial log
             log_file = log_path || socket_path.sub(/\\.socket$/, '.log')
@@ -184,7 +186,8 @@ module Consolle
               socket_path: socket_path,
               rails_root: rails_root,
               rails_env: rails_env,
-              logger: logger
+              logger: logger,
+              command: command
             )
             
             puts "[Server] Starting server with log level: \#{log_level}..."

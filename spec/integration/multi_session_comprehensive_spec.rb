@@ -31,6 +31,8 @@ RSpec.describe "Comprehensive multi-session tests" do
     
     before do
       cli.options = { target: "test" }
+      # Suppress error output during validation tests
+      allow(cli).to receive(:puts)
     end
     
     it "rejects names with special characters" do
