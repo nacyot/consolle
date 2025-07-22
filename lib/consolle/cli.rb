@@ -212,6 +212,7 @@ module Consolle
     desc "exec CODE", "Execute Ruby code in Rails console"
     method_option :timeout, type: :numeric, aliases: "-t", desc: "Timeout in seconds", default: 15
     method_option :file, type: :string, aliases: "-f", desc: "Read Ruby code from FILE"
+    method_option :raw, type: :boolean, desc: "Do not apply escape fixes for Claude Code (keep \\! as is)"
     def exec(*code_parts)
       ensure_rails_project!
       ensure_project_directories
@@ -274,6 +275,11 @@ module Consolle
       if code.strip.empty?
         puts "Error: No code provided (pass CODE or use -f FILE)"
         exit 1
+      end
+
+      # Apply Claude Code escape fix unless --raw option is specified
+      unless options[:raw]
+        code = code.gsub('\\!', '!')
       end
 
       puts "Executing: #{code}" if options[:verbose]
