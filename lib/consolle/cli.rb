@@ -12,6 +12,7 @@ require_relative "adapters/rails_console"
 module Consolle
   class CLI < Thor
     class_option :verbose, type: :boolean, aliases: "-v", desc: "Verbose output"
+    class_option :target, type: :string, aliases: "-t", desc: "Target session name", default: "cone"
 
     def self.exit_on_failure?
       true
@@ -47,6 +48,7 @@ module Consolle
     def start
       ensure_rails_project!
       ensure_project_directories
+      validate_session_name!(options[:target])
       
       # Check if already running using session info
       session_info = load_session_info
@@ -69,7 +71,7 @@ module Consolle
         clear_session_info
       end
       
-      adapter = create_rails_adapter(options[:rails_env])
+      adapter = create_rails_adapter(options[:rails_env], options[:target])
 
       puts "Starting Rails console..."
       
@@ -96,6 +98,7 @@ module Consolle
     desc "status", "Show Rails console status"
     def status
       ensure_rails_project!
+      validate_session_name!(options[:target])
       
       session_info = load_session_info
       
@@ -105,7 +108,7 @@ module Consolle
       end
 
       # Check if server is actually responsive
-      adapter = create_rails_adapter
+      adapter = create_rails_adapter("development", options[:target])
       server_status = adapter.get_status rescue nil
       process_running = server_status && server_status["success"] && server_status["running"]
       
@@ -124,11 +127,63 @@ module Consolle
       end
     end
 
+    desc "ls", "List active Rails console sessions"
+    def ls
+      ensure_rails_project!
+      
+      sessions = load_sessions
+      
+      if sessions.empty? || sessions.size == 1 && sessions.key?("_schema")
+        puts "No active sessions"
+        return
+      end
+      
+      active_sessions = []
+      stale_sessions = []
+      
+      sessions.each do |name, info|
+        next if name == "_schema"  # Skip schema field
+        
+        # Check if process is alive
+        if info["process_pid"] && process_alive?(info["process_pid"])
+          # Try to get server status
+          adapter = create_rails_adapter("development", name)
+          server_status = adapter.get_status rescue nil
+          
+          if server_status && server_status["success"] && server_status["running"]
+            rails_env = server_status["rails_env"] || "development"
+            console_pid = server_status["pid"] || info["process_pid"]
+            active_sessions << "#{name} (#{rails_env}) - PID: #{console_pid}"
+          else
+            stale_sessions << name
+          end
+        else
+          stale_sessions << name
+        end
+      end
+      
+      # Clean up stale sessions
+      if stale_sessions.any?
+        with_sessions_lock do
+          sessions = load_sessions
+          stale_sessions.each { |name| sessions.delete(name) }
+          save_sessions(sessions)
+        end
+      end
+      
+      if active_sessions.empty?
+        puts "No active sessions"
+      else
+        active_sessions.each { |session| puts session }
+      end
+    end
+
     desc "stop", "Stop Rails console"
     def stop
       ensure_rails_project!
+      validate_session_name!(options[:target])
       
-      adapter = create_rails_adapter
+      adapter = create_rails_adapter("development", options[:target])
       
       if adapter.running?
         puts "Stopping Rails console..."
@@ -158,8 +213,9 @@ module Consolle
     method_option :force, type: :boolean, aliases: "-f", desc: "Force restart the entire server"
     def restart
       ensure_rails_project!
+      validate_session_name!(options[:target])
       
-      adapter = create_rails_adapter(options[:rails_env])
+      adapter = create_rails_adapter(options[:rails_env], options[:target])
       
       if adapter.running?
         # Check if environment needs to be changed
@@ -229,6 +285,7 @@ module Consolle
     def exec(*code_parts)
       ensure_rails_project!
       ensure_project_directories
+      validate_session_name!(options[:target])
       
       session_info = load_session_info
       server_running = false
@@ -318,7 +375,7 @@ module Consolle
     private
 
     def ensure_rails_project!
-      unless File.exist?("config/environment.rb") || File.exist?("Gemfile")
+      unless File.exist?("config/environment.rb") || File.exist?("config/application.rb")
         puts "Error: This command must be run from a Rails project root directory"
         exit 1
       end
@@ -340,8 +397,19 @@ module Consolle
       File.expand_path("~/.cone/sessions/#{pwd_as_dirname}")
     end
 
-    def project_socket_path
-      File.join(Dir.pwd, "tmp", "cone", "cone.socket")
+    def project_socket_path(target = nil)
+      target ||= options[:target]
+      File.join(Dir.pwd, "tmp", "cone", "#{target}.socket")
+    end
+
+    def project_pid_path(target = nil)
+      target ||= options[:target]
+      File.join(Dir.pwd, "tmp", "cone", "#{target}.pid")
+    end
+
+    def project_log_path(target = nil)
+      target ||= options[:target]
+      File.join(Dir.pwd, "tmp", "cone", "#{target}.log")
     end
 
     def send_code_to_socket(socket_path, code, timeout: 15)
@@ -373,13 +441,17 @@ module Consolle
       { "success" => false, "error" => e.class.name, "message" => e.message }
     end
 
-    def session_file_path
-      File.join(Dir.pwd, "tmp", "cone", "session.json")
+    def sessions_file_path
+      File.join(Dir.pwd, "tmp", "cone", "sessions.json")
     end
 
-    def create_rails_adapter(rails_env = "development")
+    def create_rails_adapter(rails_env = "development", target = nil)
+      target ||= options[:target]
+      
       Consolle::Adapters::RailsConsole.new(
-        socket_path: project_socket_path,
+        socket_path: project_socket_path(target),
+        pid_path: project_pid_path(target),
+        log_path: project_log_path(target),
         rails_root: Dir.pwd,
         rails_env: rails_env,
         verbose: options[:verbose]
@@ -387,26 +459,50 @@ module Consolle
     end
 
     def save_session_info(adapter)
-      session_info = {
-        socket_path: adapter.socket_path,
-        process_pid: adapter.process_pid,
-        started_at: Time.now.to_f,
-        rails_root: Dir.pwd
-      }
+      target = options[:target]
       
-      File.write(session_file_path, JSON.generate(session_info))
+      with_sessions_lock do
+        sessions = load_sessions
+        
+        sessions[target] = {
+          "socket_path" => adapter.socket_path,
+          "process_pid" => adapter.process_pid,
+          "pid_path" => project_pid_path(target),
+          "log_path" => project_log_path(target),
+          "started_at" => Time.now.to_f,
+          "rails_root" => Dir.pwd
+        }
+        
+        save_sessions(sessions)
+      end
     end
 
     def load_session_info
-      return nil unless File.exist?(session_file_path)
+      target = options[:target]
+      sessions = load_sessions
       
-      JSON.parse(File.read(session_file_path), symbolize_names: true)
-    rescue JSON::ParserError
-      nil
+      return nil if sessions.empty?
+      
+      session = sessions[target]
+      return nil unless session
+      
+      # Convert to symbolized keys for backward compatibility
+      {
+        socket_path: session["socket_path"],
+        process_pid: session["process_pid"],
+        started_at: session["started_at"],
+        rails_root: session["rails_root"]
+      }
     end
 
     def clear_session_info
-      File.delete(session_file_path) if File.exist?(session_file_path)
+      target = options[:target]
+      
+      with_sessions_lock do
+        sessions = load_sessions
+        sessions.delete(target)
+        save_sessions(sessions)
+      end
     end
 
     def log_session_activity(process_pid, code, result)
@@ -451,6 +547,108 @@ module Consolle
     rescue StandardError => e
       # Log errors should not crash the command
       puts "Warning: Failed to log session event: #{e.message}" if options[:verbose]
+    end
+    
+    def load_sessions
+      # Check for legacy session.json file first
+      legacy_file = File.join(Dir.pwd, "tmp", "cone", "session.json")
+      if File.exist?(legacy_file) && !File.exist?(sessions_file_path)
+        # Migrate from old format
+        migrate_legacy_session(legacy_file)
+      end
+      
+      return {} unless File.exist?(sessions_file_path)
+      
+      json = JSON.parse(File.read(sessions_file_path))
+      
+      # Handle backward compatibility with old single-session format
+      if json.key?("socket_path")
+        # Legacy single session format - convert to new format
+        { "cone" => json }
+      else
+        # New multi-session format
+        json
+      end
+    rescue JSON::ParserError, Errno::ENOENT
+      {}
+    end
+    
+    def migrate_legacy_session(legacy_file)
+      legacy_data = JSON.parse(File.read(legacy_file))
+      
+      # Convert to new format
+      new_sessions = {
+        "_schema" => 1,
+        "cone" => legacy_data
+      }
+      
+      # Write new format
+      File.write(sessions_file_path, JSON.pretty_generate(new_sessions))
+      
+      # Remove old file
+      File.delete(legacy_file)
+      
+      puts "Migrated session data to new multi-session format" if options[:verbose]
+    rescue StandardError => e
+      puts "Warning: Failed to migrate legacy session: #{e.message}" if options[:verbose]
+    end
+    
+    def save_sessions(sessions)
+      # Add schema version for future migrations
+      sessions_with_schema = { "_schema" => 1 }.merge(sessions)
+      
+      # Write to temp file first for atomicity - use PID to avoid conflicts
+      temp_path = "#{sessions_file_path}.tmp.#{Process.pid}"
+      File.write(temp_path, JSON.pretty_generate(sessions_with_schema))
+      
+      # Atomic rename - will overwrite existing file
+      File.rename(temp_path, sessions_file_path)
+    rescue StandardError => e
+      # Clean up temp file if rename fails
+      File.unlink(temp_path) if File.exist?(temp_path)
+      raise e
+    end
+    
+    def with_sessions_lock(&block)
+      # Ensure directory exists
+      FileUtils.mkdir_p(File.dirname(sessions_file_path))
+      
+      # Create lock file separate from sessions file to avoid issues
+      lock_file_path = "#{sessions_file_path}.lock"
+      
+      # Use file locking to prevent concurrent access
+      File.open(lock_file_path, File::RDWR | File::CREAT, 0644) do |f|
+        f.flock(File::LOCK_EX)
+        
+        # Execute the block
+        yield
+      ensure
+        f.flock(File::LOCK_UN)
+      end
+    end
+    
+    def process_alive?(pid)
+      return false unless pid
+      
+      Process.kill(0, pid)
+      true
+    rescue Errno::ESRCH, Errno::EPERM
+      false
+    end
+    
+    def validate_session_name!(name)
+      # Allow alphanumeric, hyphen, and underscore only
+      unless name.match?(/\A[a-zA-Z0-9_-]+\z/)
+        puts "Error: Invalid session name '#{name}'"
+        puts "Session names can only contain letters, numbers, hyphens (-), and underscores (_)"
+        exit 1
+      end
+      
+      # Check length (reasonable limit)
+      if name.length > 50
+        puts "Error: Session name is too long (maximum 50 characters)"
+        exit 1
+      end
     end
   end
 end

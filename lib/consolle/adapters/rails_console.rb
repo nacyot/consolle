@@ -9,10 +9,12 @@ require "fileutils"
 module Consolle
   module Adapters
     class RailsConsole
-      attr_reader :socket_path, :process_pid
+      attr_reader :socket_path, :process_pid, :pid_path, :log_path
 
-      def initialize(socket_path: nil, rails_root: nil, rails_env: nil, verbose: false)
+      def initialize(socket_path: nil, pid_path: nil, log_path: nil, rails_root: nil, rails_env: nil, verbose: false)
         @socket_path = socket_path || default_socket_path
+        @pid_path = pid_path || default_pid_path
+        @log_path = log_path || default_log_path
         @rails_root = rails_root || Dir.pwd
         @rails_env = rails_env || "development"
         @verbose = verbose
@@ -64,7 +66,7 @@ module Consolle
 
       def process_pid
         # Return the server daemon PID from pid file
-        pid_file = @socket_path.sub(/\.socket$/, '.pid')
+        pid_file = @pid_path
         return nil unless File.exist?(pid_file)
         
         File.read(pid_file).strip.to_i
@@ -121,6 +123,14 @@ module Consolle
         File.join(Dir.pwd, "tmp", "cone", "cone.socket")
       end
 
+      def default_pid_path
+        File.join(Dir.pwd, "tmp", "cone", "cone.pid")
+      end
+
+      def default_log_path
+        File.join(Dir.pwd, "tmp", "cone", "cone.log")
+      end
+
       def server_command
         consolle_lib_path = File.expand_path("../..", __dir__)
         
@@ -133,7 +143,9 @@ module Consolle
           @socket_path,
           @rails_root,
           @rails_env,
-          @verbose ? "debug" : "info"
+          @verbose ? "debug" : "info",
+          @pid_path,
+          @log_path
         ]
       end
 
@@ -143,10 +155,10 @@ module Consolle
             require 'consolle/server/console_socket_server'
             require 'logger'
             
-            socket_path, rails_root, rails_env, log_level = ARGV
+            socket_path, rails_root, rails_env, log_level, pid_path, log_path = ARGV
             
             # Write initial log
-            log_file = socket_path.sub(/\\.socket$/, '.log')
+            log_file = log_path || socket_path.sub(/\\.socket$/, '.log')
             File.open(log_file, 'a') { |f| f.puts "[Server] Starting... PID: \#{Process.pid}" }
             
             # Daemonize
@@ -158,7 +170,7 @@ module Consolle
             $stdout.sync = $stderr.sync = true
             
             # Write PID file
-            pid_file = socket_path.sub(/\\.socket$/, '.pid')
+            pid_file = pid_path || socket_path.sub(/\\.socket$/, '.pid')
             File.write(pid_file, Process.pid.to_s)
             
             puts "[Server] Daemon started, PID: \#{Process.pid}"
@@ -196,7 +208,7 @@ module Consolle
         FileUtils.mkdir_p(socket_dir) unless Dir.exist?(socket_dir)
         
         # Start server process
-        log_file = @socket_path.sub(/\.socket$/, '.log')
+        log_file = @log_path
         pid = Process.spawn(
           *server_command,
           out: log_file,
@@ -208,7 +220,7 @@ module Consolle
 
       def stop_server_daemon
         # Read PID file
-        pid_file = @socket_path.sub(/\.socket$/, '.pid')
+        pid_file = @pid_path
         return unless File.exist?(pid_file)
         
         pid = File.read(pid_file).to_i
