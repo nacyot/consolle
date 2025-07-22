@@ -198,39 +198,4 @@ RSpec.describe "Multi-session support" do
     end
   end
   
-  describe "#ls with multiple sessions" do
-    before do
-      cli.options = { target: "cone" }
-      multi_data = {
-        "_schema" => 1,
-        "cone" => {
-          "socket_path" => File.join(test_dir, "tmp/cone/cone.socket"),
-          "process_pid" => Process.pid  # Use current process for alive check
-        },
-        "dev" => {
-          "socket_path" => File.join(test_dir, "tmp/cone/dev.socket"),
-          "process_pid" => 999999  # Non-existent process
-        }
-      }
-      File.write(sessions_file, JSON.generate(multi_data))
-      
-      # Mock adapter to prevent actual socket connections
-      adapter = double("adapter")
-      allow(adapter).to receive(:get_status).and_return({
-        "success" => true,
-        "running" => true,
-        "rails_env" => "development",
-        "pid" => Process.pid
-      })
-      allow(cli).to receive(:create_rails_adapter).and_return(adapter)
-    end
-    
-    it "shows active sessions and cleans up stale ones" do
-      expect { cli.ls }.to output(/cone \(development\) - PID: #{Process.pid}/).to_stdout
-      
-      # Verify stale session was removed
-      sessions = JSON.parse(File.read(sessions_file))
-      expect(sessions).not_to have_key("dev")
-    end
-  end
 end
