@@ -48,9 +48,7 @@ module Consolle
         @mutex.synchronize do
           raise "Console is not running" unless running?
           
-          # Clear any pending output multiple times to ensure clean state
-          clear_buffer
-          sleep 0.1
+          # Clear any pending output to ensure clean state
           clear_buffer
           
           # Encode code using Base64 to handle special characters and remote consoles
@@ -219,15 +217,13 @@ module Consolle
         
         # Wait for the dummy command to complete and consume all output
         begin
-          wait_for_prompt(timeout: 5, consume_all: true)
+          wait_for_prompt(timeout: 2, consume_all: true)
         rescue Timeout::Error
           logger.warn "[ConsoleSupervisor] No prompt after dummy command, continuing anyway"
         end
         
-        # Clear buffer multiple times to ensure it's completely empty
-        sleep 0.5
-        clear_buffer
-        sleep 0.1
+        # Clear buffer to ensure it's completely empty
+        sleep 0.2
         clear_buffer
         
         logger.info "[ConsoleSupervisor] Rails console started (PID: #{@pid})"
@@ -293,8 +289,8 @@ module Consolle
           
           # If we found prompt and consume_all is true, continue reading for a bit more
           if prompt_found && consume_all
-            if Time.now - last_data_time > 0.5
-              logger.info "[ConsoleSupervisor] No more data for 0.5s after prompt, stopping"
+            if Time.now - last_data_time > 0.3
+              logger.info "[ConsoleSupervisor] No more data for 0.3s after prompt, stopping"
               return true
             end
           elsif prompt_found
@@ -325,8 +321,8 @@ module Consolle
       end
 
       def clear_buffer
-        # Try multiple times with small delays to ensure buffer is completely empty
-        3.times do
+        # Try to clear buffer with minimal delay
+        2.times do |i|
           begin
             loop do
               @reader.read_nonblock(4096)
@@ -334,7 +330,7 @@ module Consolle
           rescue IO::WaitReadable, Errno::EIO
             # Buffer cleared for this iteration
           end
-          sleep 0.05
+          sleep 0.02 if i == 0  # Only sleep after first iteration
         end
       end
 
@@ -368,7 +364,7 @@ module Consolle
             @writer.flush
             
             # Wait briefly for command to execute
-            sleep 0.2
+            sleep 0.1
             
             # Clear any output from the configuration command (these commands typically don't produce visible output)
             clear_buffer
@@ -379,23 +375,24 @@ module Consolle
         
         # Send multiple empty lines to ensure all settings are processed
         # This is especially important for remote consoles like kamal console
-        3.times do
+        2.times do
           @writer.puts
           @writer.flush
-          sleep 0.1
+          sleep 0.05
         end
         
         # Clear buffer again after sending empty lines
         clear_buffer
         
-        # Wait for prompt to appear after configuration and consume all output
+        # Wait for prompt after configuration with reasonable timeout
         begin
-          wait_for_prompt(timeout: 5, consume_all: true)
+          wait_for_prompt(timeout: 2, consume_all: false)
         rescue Timeout::Error
-          logger.warn "[ConsoleSupervisor] No prompt after IRB configuration, continuing anyway"
+          # This can fail with some console types, but that's okay
+          logger.debug "[ConsoleSupervisor] No prompt after IRB configuration, continuing"
         end
         
-        # Clear buffer one more time after waiting for prompt
+        # Final buffer clear
         clear_buffer
         
         logger.debug "[ConsoleSupervisor] IRB configured for automation"

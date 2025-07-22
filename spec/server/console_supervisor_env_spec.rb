@@ -111,10 +111,14 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
     end
 
     it "has short wait time after configuration" do
-      expect(supervisor_without_init).to receive(:sleep).with(0.2).at_least(:once)
-      expect(supervisor_without_init).to receive(:sleep).with(0.1).at_least(3).times
+      # Allow various sleep times that occur during configuration
+      allow(supervisor_without_init).to receive(:sleep)
       
       supervisor_without_init.send(:configure_irb_for_automation)
+      
+      # Verify that sleep was called with reasonable times
+      expect(supervisor_without_init).to have_received(:sleep).with(0.1).at_least(5).times  # For each IRB command
+      expect(supervisor_without_init).to have_received(:sleep).with(0.05).at_least(2).times  # For empty lines
     end
   end
 end
