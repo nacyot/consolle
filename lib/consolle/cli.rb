@@ -18,6 +18,22 @@ module Consolle
       true
     end
 
+    # Override invoke_command to handle --help flag for subcommands
+    no_commands do
+      def invoke_command(command, *args)
+        # Check if --help or -h is in the original arguments
+        if ARGV.include?("--help") || ARGV.include?("-h")
+          # Show help for the command
+          self.class.command_help(shell, command.name)
+          return
+        end
+        
+        # Call original invoke_command
+        super
+      end
+    end
+    
+
     default_task :default
 
     desc "default", "Start console"
@@ -207,6 +223,62 @@ module Consolle
       end
       
       clear_session_info
+    end
+
+    desc "stop_all", "Stop all Rails console sessions"
+    map ["stop-all"] => :stop_all
+    def stop_all
+      ensure_rails_project!
+      
+      sessions = load_sessions
+      active_sessions = []
+      
+      # Filter active sessions (excluding schema)
+      sessions.each do |name, info|
+        next if name == "_schema"
+        if info["process_pid"] && process_alive?(info["process_pid"])
+          active_sessions << { name: name, info: info }
+        end
+      end
+      
+      if active_sessions.empty?
+        puts "No active sessions to stop"
+        return
+      end
+      
+      puts "Found #{active_sessions.size} active session(s)"
+      
+      # Stop each active session
+      active_sessions.each do |session|
+        name = session[:name]
+        info = session[:info]
+        
+        puts "\nStopping session '#{name}'..."
+        
+        adapter = create_rails_adapter("development", name)
+        
+        if adapter.stop
+          puts "✓ Session '#{name}' stopped"
+          
+          # Log session stop
+          if info["process_pid"]
+            log_session_event(info["process_pid"], "session_stop", {
+              reason: "stop_all_requested"
+            })
+          end
+          
+          # Clear session info
+          with_sessions_lock do
+            sessions = load_sessions
+            sessions.delete(name)
+            save_sessions(sessions)
+          end
+        else
+          puts "✗ Failed to stop session '#{name}'"
+        end
+      end
+      
+      puts "\n✓ All sessions stopped"
     end
 
     desc "restart", "Restart Rails console"
