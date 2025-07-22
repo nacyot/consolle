@@ -29,11 +29,12 @@ RSpec.describe Consolle::CLI do
     end
 
     it "creates the project socket path correctly" do
+      cli.options = { target: "cone" }
       expect(cli.send(:project_socket_path)).to eq("/Users/test/project/tmp/cone/cone.socket")
     end
 
-    it "creates the session file path correctly" do
-      expect(cli.send(:session_file_path)).to eq("/Users/test/project/tmp/cone/session.json")
+    it "creates the sessions file path correctly" do
+      expect(cli.send(:sessions_file_path)).to eq("/Users/test/project/tmp/cone/sessions.json")
     end
 
     it "creates the project session directory correctly" do

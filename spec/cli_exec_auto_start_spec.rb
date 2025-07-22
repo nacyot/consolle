@@ -12,9 +12,11 @@ RSpec.describe Consolle::CLI do
     before do
       allow(cli).to receive(:ensure_rails_project!)
       allow(cli).to receive(:ensure_project_directories)
+      allow(cli).to receive(:validate_session_name!)
       allow(cli).to receive(:project_socket_path).and_return(socket_path)
-      allow(cli).to receive(:session_file_path).and_return("/tmp/cone/session.json")
+      allow(cli).to receive(:sessions_file_path).and_return("/tmp/cone/sessions.json")
       allow(Dir).to receive(:pwd).and_return("/test")
+      cli.options = { target: "cone", timeout: 15, verbose: false, raw: false }
     end
     
     context "when server is not running" do
@@ -113,7 +115,7 @@ RSpec.describe Consolle::CLI do
       let(:test_file) { "/tmp/test.rb" }
       
       before do
-        allow(cli).to receive(:options).and_return({ file: test_file, verbose: false, timeout: 15 })
+        cli.options = { file: test_file, verbose: false, timeout: 15, target: "cone", raw: false }
         allow(File).to receive(:file?).with(test_file).and_return(true)
         allow(File).to receive(:read).with(test_file, mode: "r:UTF-8").and_return("puts 'Hello'")
         
