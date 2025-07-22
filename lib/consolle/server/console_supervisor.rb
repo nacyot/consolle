@@ -5,6 +5,13 @@ require "timeout"
 require "fcntl"
 require "logger"
 
+# Ruby 3.4.0+ extracts base64 as a default gem
+# Suppress warning by silencing verbose mode temporarily
+original_verbose = $VERBOSE
+$VERBOSE = nil
+require "base64"
+$VERBOSE = original_verbose
+
 module Consolle
   module Server
     class ConsoleSupervisor
@@ -15,8 +22,8 @@ module Consolle
       RESTART_WINDOW = 300  # 5 minutes
       # Match various Rails console prompts
       # Match various console prompts: custom sentinel, Rails app prompts, IRB prompts, and generic prompts
-      # Allow optional characters before the prompt (e.g., Unicode symbols like ▽)
-      PROMPT_PATTERN = /^.*?(\u001E\u001F<CONSOLLE>\u001F\u001E|\w+[-_]?\w*\([^)]*\)>|irb\([^)]+\):[\d]+:?[\d]*[>*]|>>|>)\s*$/
+      # Allow optional non-word characters before the prompt (e.g., Unicode symbols like ▽)
+      PROMPT_PATTERN = /^[^\w]*(\u001E\u001F<CONSOLLE>\u001F\u001E|\w+[-_]?\w*\([^)]*\)>|irb\([^)]+\):[\d]+:?[\d]*[>*]|>>|>)\s*$/
       CTRL_C = "\x03"
 
       def initialize(rails_root:, rails_env: "development", logger: nil, command: nil)
@@ -44,27 +51,14 @@ module Consolle
           # Clear any pending output
           clear_buffer
           
-          # Write code to temporary file and eval it
-          require 'tempfile'
-          tempfile = Tempfile.new(['consolle_eval', '.rb'])
-          eval_command = nil
+          # Encode code using Base64 to handle special characters and remote consoles
+          encoded_code = Base64.strict_encode64(code)
           
-          begin
-            tempfile.write(code)
-            tempfile.close
-            
-            # Use eval to execute the code from file
-            eval_command = "eval(File.read('#{tempfile.path}'), IRB.CurrentContext.workspace.binding)"
-            logger.debug "[ConsoleSupervisor] Sending eval command: #{eval_command.inspect}"
-            @writer.puts eval_command
-            @writer.flush
-            
-            # Store tempfile for cleanup
-            @tempfile_to_delete = tempfile
-          rescue => e
-            tempfile.unlink rescue nil
-            raise e
-          end
+          # Use eval to execute the Base64-decoded code
+          eval_command = "eval(Base64.decode64('#{encoded_code}'), IRB.CurrentContext.workspace.binding)"
+          logger.debug "[ConsoleSupervisor] Sending eval command (Base64 encoded)"
+          @writer.puts eval_command
+          @writer.flush
           
           # Collect output
           output = +""
@@ -126,12 +120,6 @@ module Consolle
           rescue StandardError => e
             logger.error "[ConsoleSupervisor] Eval error: #{e.message}"
             { success: false, output: "Error: #{e.message}", execution_time: nil }
-          ensure
-            # Clean up temporary file
-            if @tempfile_to_delete
-              @tempfile_to_delete.unlink rescue nil
-              @tempfile_to_delete = nil
-            end
           end
         end
       end
@@ -382,14 +370,14 @@ module Consolle
         skip_echo = true
         
         lines.each_with_index do |line, idx|
-          # Skip the eval command echo
-          if skip_echo && line.include?("eval(File.read")
+          # Skip the eval command echo (both file-based and Base64)
+          if skip_echo && (line.include?("eval(File.read") || line.include?("eval(Base64.decode64"))
             skip_echo = false
             next
           end
           
-          # Skip prompts (but not at the end - we handle that separately)
-          if line.match?(PROMPT_PATTERN)
+          # Skip prompts (but not return values that start with =>)
+          if line.match?(PROMPT_PATTERN) && !line.start_with?("=>")
             next
           end
           
