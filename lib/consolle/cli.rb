@@ -214,6 +214,7 @@ module Consolle
     method_option :file, type: :string, aliases: "-f", desc: "Read Ruby code from FILE"
     def exec(*code_parts)
       ensure_rails_project!
+      ensure_project_directories
       
       session_info = load_session_info
       server_running = false
