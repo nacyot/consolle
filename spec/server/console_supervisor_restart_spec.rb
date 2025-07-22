@@ -51,6 +51,8 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
         allow(new_reader).to receive(:fcntl)
         allow(new_reader).to receive(:close)
         allow(new_writer).to receive(:close)
+        allow(new_writer).to receive(:puts)
+        allow(new_writer).to receive(:flush)
         allow(new_reader).to receive(:read_nonblock).and_raise(wait_readable_error)
         [new_reader, new_writer, @new_pid]
       end

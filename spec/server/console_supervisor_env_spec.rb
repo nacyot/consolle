@@ -24,8 +24,10 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
         allow(reader).to receive(:sync=)
         allow(writer).to receive(:sync=)
         allow(reader).to receive(:fcntl)
+        allow(reader).to receive(:close)
         allow(writer).to receive(:close)
-        allow(writer).to receive(:close)
+        allow(writer).to receive(:puts)
+        allow(writer).to receive(:flush)
         
         wait_readable_error = Class.new(StandardError) { include IO::WaitReadable }.new
         allow(reader).to receive(:read_nonblock).and_raise(wait_readable_error)
@@ -110,7 +112,7 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
 
     it "has short wait time after configuration" do
       expect(supervisor_without_init).to receive(:sleep).with(0.2).at_least(:once)
-      expect(supervisor_without_init).to receive(:sleep).with(0.3).once
+      expect(supervisor_without_init).to receive(:sleep).with(0.1).at_least(3).times
       
       supervisor_without_init.send(:configure_irb_for_automation)
     end

@@ -23,8 +23,8 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
     allow(reader).to receive(:fcntl)
     allow(reader).to receive(:close)
     allow(writer).to receive(:close)
-    allow(writer).to receive(:puts).with("exit")  # For stop_console method
-    allow(writer).to receive(:flush)  # For stop_console method
+    allow(writer).to receive(:puts)  # For all puts calls
+    allow(writer).to receive(:flush)  # For all flush calls
     
     # Create a proper exception for IO::WaitReadable
     wait_readable_error = Class.new(StandardError) { include IO::WaitReadable }.new
@@ -88,24 +88,22 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
       allow(writer).to receive(:puts)
       allow(writer).to receive(:flush)
       allow(writer).to receive(:write)
+      # Mock clear_buffer and sleep to avoid delays in tests
+      allow(supervisor).to receive(:clear_buffer)
+      allow(supervisor).to receive(:sleep)
     end
 
     it "executes code and returns result" do
       # Create a proper exception for IO::WaitReadable
       wait_readable_error = Class.new(StandardError) { include IO::WaitReadable }.new
       
-      # Mock tempfile
-      tempfile = double("tempfile")
-      allow(tempfile).to receive(:write).with("1 + 1")
-      allow(tempfile).to receive(:close)
-      allow(tempfile).to receive(:path).and_return("/tmp/consolle_eval_12345.rb")
-      allow(tempfile).to receive(:unlink)
-      allow(Tempfile).to receive(:new).and_return(tempfile)
+      # Mock Base64 encoding
+      encoded_code = Base64.strict_encode64("1 + 1")
       
       # Mock execution result - Rails console actual output format with eval command
-      # The actual command sent is: result = eval(File.read('...'), IRB.CurrentContext.workspace.binding); pp result; result
-      eval_command = "result = eval(File.read('/tmp/consolle_eval_12345.rb'), IRB.CurrentContext.workspace.binding); pp result; result"
-      output_with_prompt = "#{eval_command}\n2\n=> 2\nlua-home(dev)> "
+      # The actual command sent is: eval(Base64.decode64('...'), IRB.CurrentContext.workspace.binding)
+      eval_command = "eval(Base64.decode64('#{encoded_code}'), IRB.CurrentContext.workspace.binding)"
+      output_with_prompt = "#{eval_command}\n=> 2\nlua-home(dev)> "
       
       read_count = 0
       allow(reader).to receive(:read_nonblock) do
@@ -125,7 +123,7 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
       result = supervisor.eval("1 + 1")
       
       expect(result[:success]).to be true
-      expect(result[:output]).to eq("2\n=> 2")
+      expect(result[:output]).to eq("=> 2")
     end
 
     it "sends Ctrl-C on timeout" do

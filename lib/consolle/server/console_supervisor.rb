@@ -48,7 +48,9 @@ module Consolle
         @mutex.synchronize do
           raise "Console is not running" unless running?
           
-          # Clear any pending output
+          # Clear any pending output multiple times to ensure clean state
+          clear_buffer
+          sleep 0.1
           clear_buffer
           
           # Encode code using Base64 to handle special characters and remote consoles
@@ -210,8 +212,22 @@ module Consolle
         # Configure IRB settings for automation
         configure_irb_for_automation
         
-        # Wait for the new prompt to be applied
+        # Send a dummy command to ensure all configuration output is flushed
+        # This helps prevent configuration output from appearing in the first exec
+        @writer.puts "nil"
+        @writer.flush
+        
+        # Wait for the dummy command to complete and consume all output
+        begin
+          wait_for_prompt(timeout: 5, consume_all: true)
+        rescue Timeout::Error
+          logger.warn "[ConsoleSupervisor] No prompt after dummy command, continuing anyway"
+        end
+        
+        # Clear buffer multiple times to ensure it's completely empty
         sleep 0.5
+        clear_buffer
+        sleep 0.1
         clear_buffer
         
         logger.info "[ConsoleSupervisor] Rails console started (PID: #{@pid})"
@@ -262,9 +278,11 @@ module Consolle
         end
       end
 
-      def wait_for_prompt(timeout: 15)
+      def wait_for_prompt(timeout: 15, consume_all: false)
         output = +""
         deadline = Time.now + timeout
+        prompt_found = false
+        last_data_time = Time.now
         
         loop do
           if Time.now > deadline
@@ -273,9 +291,20 @@ module Consolle
             raise Timeout::Error, "No prompt after #{timeout} seconds"
           end
           
+          # If we found prompt and consume_all is true, continue reading for a bit more
+          if prompt_found && consume_all
+            if Time.now - last_data_time > 0.5
+              logger.info "[ConsoleSupervisor] No more data for 0.5s after prompt, stopping"
+              return true
+            end
+          elsif prompt_found
+            return true
+          end
+          
           begin
             chunk = @reader.read_nonblock(4096)
             output << chunk
+            last_data_time = Time.now
             logger.debug "[ConsoleSupervisor] Got chunk: #{chunk.inspect}"
             
             clean = strip_ansi(output)
@@ -283,7 +312,7 @@ module Consolle
             clean.lines.each do |line|
               if line.match?(PROMPT_PATTERN)
                 logger.info "[ConsoleSupervisor] Found prompt!"
-                return true
+                prompt_found = true
               end
             end
           rescue IO::WaitReadable
@@ -296,11 +325,17 @@ module Consolle
       end
 
       def clear_buffer
-        loop do
-          @reader.read_nonblock(4096)
+        # Try multiple times with small delays to ensure buffer is completely empty
+        3.times do
+          begin
+            loop do
+              @reader.read_nonblock(4096)
+            end
+          rescue IO::WaitReadable, Errno::EIO
+            # Buffer cleared for this iteration
+          end
+          sleep 0.05
         end
-      rescue IO::WaitReadable, Errno::EIO
-        # Buffer cleared
       end
 
       def configure_irb_for_automation
@@ -353,12 +388,15 @@ module Consolle
         # Clear buffer again after sending empty lines
         clear_buffer
         
-        # Wait for prompt to appear after configuration
+        # Wait for prompt to appear after configuration and consume all output
         begin
-          wait_for_prompt(timeout: 5)
+          wait_for_prompt(timeout: 5, consume_all: true)
         rescue Timeout::Error
           logger.warn "[ConsoleSupervisor] No prompt after IRB configuration, continuing anyway"
         end
+        
+        # Clear buffer one more time after waiting for prompt
+        clear_buffer
         
         logger.debug "[ConsoleSupervisor] IRB configured for automation"
       end

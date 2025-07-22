@@ -4,7 +4,7 @@ require "spec_helper"
 require "consolle/cli"
 
 RSpec.describe Consolle::CLI do
-  describe "#exec with auto-start" do
+  describe "#exec without auto-start" do
     let(:cli) { described_class.new }
     let(:socket_path) { "/tmp/cone/cone.socket" }
     let(:session_info) { { socket_path: socket_path, process_pid: 12345, started_at: Time.now.to_f, rails_root: "/test" } }
@@ -38,12 +38,11 @@ RSpec.describe Consolle::CLI do
         allow(cli).to receive(:log_session_activity)
       end
       
-      it "automatically starts the server" do
-        expect(cli).to receive(:puts).with("Rails console is not running. Starting it automatically...")
-        expect(cli).to receive(:invoke).with(:start, [], {})
-        expect(cli).to receive(:puts).with("42")
-        
-        cli.exec("21 + 21")
+      it "shows error message when server is not running" do
+        expect(cli).to receive(:puts).with("✗ Rails console is not running")
+        expect(cli).to receive(:puts).with("Please start it first with: cone start")
+        expect(cli).not_to receive(:invoke).with(:start, [], {})
+        expect { cli.exec("21 + 21") }.to raise_error(SystemExit)
       end
     end
     
@@ -70,13 +69,11 @@ RSpec.describe Consolle::CLI do
         allow(cli).to receive(:log_session_activity)
       end
       
-      it "restarts the server" do
-        expect(cli).to receive(:puts).with("Rails console is not running. Starting it automatically...")
-        expect(cli).to receive(:clear_session_info)
-        expect(cli).to receive(:invoke).with(:start, [], {})
-        expect(cli).to receive(:puts).with("42")
-        
-        cli.exec("21 + 21")
+      it "shows error message when server is not responding" do
+        expect(cli).to receive(:puts).with("✗ Rails console is not running")
+        expect(cli).to receive(:puts).with("Please start it first with: cone start")
+        expect(cli).not_to receive(:invoke).with(:start, [], {})
+        expect { cli.exec("21 + 21") }.to raise_error(SystemExit)
       end
     end
     
@@ -136,12 +133,11 @@ RSpec.describe Consolle::CLI do
         allow(cli).to receive(:log_session_activity)
       end
       
-      it "auto-start works with file option" do
-        expect(cli).to receive(:puts).with("Rails console is not running. Starting it automatically...")
-        expect(cli).to receive(:invoke).with(:start, [], {})
-        expect(cli).to receive(:puts).with("Hello")
-        
-        cli.exec
+      it "shows error message with file option when server is not running" do
+        expect(cli).to receive(:puts).with("✗ Rails console is not running")
+        expect(cli).to receive(:puts).with("Please start it first with: cone start")
+        expect(cli).not_to receive(:invoke).with(:start, [], {})
+        expect { cli.exec }.to raise_error(SystemExit)
       end
     end
   end

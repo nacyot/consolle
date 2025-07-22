@@ -150,26 +150,43 @@ module Consolle
             response = @broker.process_request(request)
             
             # Send response
-            client.write(JSON.generate(response))
-            client.write("\n")
-            client.flush
+            begin
+              client.write(JSON.generate(response))
+              client.write("\n")
+              client.flush
+            rescue Errno::EPIPE
+              # Client disconnected before we could send response
+              logger.debug "[ConsoleSocketServer] Client disconnected before response could be sent"
+            end
           rescue JSON::ParserError => e
-            error_response = {
-              "success" => false,
-              "error" => "InvalidRequest",
-              "message" => "Invalid JSON: #{e.message}"
-            }
-            client.write(JSON.generate(error_response))
-            client.write("\n")
+            begin
+              error_response = {
+                "success" => false,
+                "error" => "InvalidRequest",
+                "message" => "Invalid JSON: #{e.message}"
+              }
+              client.write(JSON.generate(error_response))
+              client.write("\n")
+            rescue Errno::EPIPE
+              logger.debug "[ConsoleSocketServer] Client disconnected while sending JSON parse error"
+            end
+          rescue Errno::EPIPE => e
+            # Client disconnected, ignore
+            logger.debug "[ConsoleSocketServer] Client disconnected (Broken pipe)"
           rescue StandardError => e
             logger.error "[ConsoleSocketServer] Client handler error: #{e.message}"
-            error_response = {
-              "success" => false,
-              "error" => e.class.name,
-              "message" => e.message
-            }
-            client.write(JSON.generate(error_response))
-            client.write("\n")
+            begin
+              error_response = {
+                "success" => false,
+                "error" => e.class.name,
+                "message" => e.message
+              }
+              client.write(JSON.generate(error_response))
+              client.write("\n")
+            rescue Errno::EPIPE
+              # Client disconnected while sending error response
+              logger.debug "[ConsoleSocketServer] Client disconnected while sending error response"
+            end
           ensure
             client.close rescue nil
           end
