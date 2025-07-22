@@ -29,6 +29,19 @@ module Consolle
       puts "Consolle version #{Consolle::VERSION}"
     end
 
+    desc "rule FILE", "Write cone command guide to FILE"
+    def rule(file_path)
+      # Read the embedded rule content
+      rule_content = File.read(File.expand_path("../../../rule.md", __FILE__))
+      
+      # Write to the specified file
+      File.write(file_path, rule_content)
+      puts "✓ Cone command guide written to #{file_path}"
+    rescue => e
+      puts "✗ Failed to write rule file: #{e.message}"
+      exit 1
+    end
+
     desc "start", "Start Rails console in background"
     method_option :rails_env, type: :string, aliases: "-e", desc: "Rails environment", default: "development"
     def start
