@@ -91,19 +91,9 @@ $ cone exec 'User.where(active: true).count'
 $ cone exec 'puts "Hello, world!"'
 ```
 
-Single quotes prevent shell interpretation of special characters and make it easier to use double quotes within your Ruby code.
-
 ### Using the --raw Option
 
 **Note for Claude Code users: DO NOT use the --raw option.** This option is not needed in Claude Code environments.
-
-The `--raw` option is available for special cases where you need to preserve escape sequences exactly as written:
-
-```bash
-$ cone exec --raw 'puts "Special\nformatting"'
-```
-
-This option disables automatic processing of escape sequences. In most cases, you won't need this option - the default behavior works correctly for standard Ruby code.
 
 ### Multi-line Code Support
 
