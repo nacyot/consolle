@@ -342,9 +342,23 @@ module Consolle
           end
         end
         
-        # Don't wait for prompt after configuration since IRB config commands typically don't produce visible output
-        # Just give a short pause to ensure commands are processed
-        sleep 0.3
+        # Send multiple empty lines to ensure all settings are processed
+        # This is especially important for remote consoles like kamal console
+        3.times do
+          @writer.puts
+          @writer.flush
+          sleep 0.1
+        end
+        
+        # Clear buffer again after sending empty lines
+        clear_buffer
+        
+        # Wait for prompt to appear after configuration
+        begin
+          wait_for_prompt(timeout: 5)
+        rescue Timeout::Error
+          logger.warn "[ConsoleSupervisor] No prompt after IRB configuration, continuing anyway"
+        end
         
         logger.debug "[ConsoleSupervisor] IRB configured for automation"
       end

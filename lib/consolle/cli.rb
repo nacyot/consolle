@@ -331,21 +331,11 @@ module Consolle
         end
       end
       
-      # Auto-start server if not running
+      # Check if server is running
       unless server_running
-        puts "Rails console is not running. Starting it automatically..."
-        clear_session_info if session_info
-        
-        # Start the server
-        invoke(:start, [], {})
-        
-        # Reload session info
-        session_info = load_session_info
-        
-        unless session_info
-          puts "Failed to start Rails console"
-          exit 1
-        end
+        puts "✗ Rails console is not running"
+        puts "Please start it first with: cone start"
+        exit 1
       end
 
       # Apply Claude Code escape fix unless --raw option is specified
