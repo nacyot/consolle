@@ -1,22 +1,22 @@
 # frozen_string_literal: true
 
-require "socket"
-require "json"
-require "logger"
-require "fileutils"
-require_relative "console_supervisor"
-require_relative "request_broker"
+require 'socket'
+require 'json'
+require 'logger'
+require 'fileutils'
+require_relative 'console_supervisor'
+require_relative 'request_broker'
 
 module Consolle
   module Server
     class ConsoleSocketServer
       attr_reader :socket_path, :logger
 
-      def initialize(socket_path:, rails_root:, rails_env: "development", logger: nil, command: nil)
+      def initialize(socket_path:, rails_root:, rails_env: 'development', logger: nil, command: nil)
         @socket_path = socket_path
         @rails_root = rails_root
         @rails_env = rails_env
-        @command = command || "bin/rails console"
+        @command = command || 'bin/rails console'
         @logger = logger || begin
           log = Logger.new(STDOUT)
           log.level = Logger::DEBUG
@@ -36,10 +36,10 @@ module Consolle
         setup_supervisor
         setup_broker
         setup_signal_handlers
-        
+
         @running = true
         @accept_thread = start_accept_loop
-        
+
         logger.info "[ConsoleSocketServer] Started at #{@socket_path}"
         true
       rescue StandardError => e
@@ -52,21 +52,25 @@ module Consolle
         return false unless @running
 
         @running = false
-        
+
         # Stop accepting new connections
-        @server&.close rescue nil
+        begin
+          @server&.close
+        rescue StandardError
+          nil
+        end
         @accept_thread&.join(5)
-        
+
         # Stop broker
         @broker&.stop
-        
+
         # Stop supervisor
         @supervisor&.stop
-        
+
         # Clean up socket file
         File.unlink(@socket_path) if File.exist?(@socket_path)
-        
-        logger.info "[ConsoleSocketServer] Stopped"
+
+        logger.info '[ConsoleSocketServer] Stopped'
         true
       end
 
@@ -80,15 +84,15 @@ module Consolle
         # Ensure socket directory exists
         socket_dir = File.dirname(@socket_path)
         FileUtils.mkdir_p(socket_dir) unless Dir.exist?(socket_dir)
-        
+
         # Remove existing socket file
         File.unlink(@socket_path) if File.exist?(@socket_path)
-        
+
         # Create Unix socket
         @server = UNIXServer.new(@socket_path)
-        
+
         # Set permissions (owner only)
-        File.chmod(0600, @socket_path)
+        File.chmod(0o600, @socket_path)
       end
 
       def setup_supervisor
@@ -127,6 +131,7 @@ module Consolle
             rescue IOError => e
               # Socket closed, expected during shutdown
               break unless @running
+
               logger.error "[ConsoleSocketServer] Accept error: #{e.message}"
             rescue StandardError => e
               logger.error "[ConsoleSocketServer] Unexpected error: #{e.message}"
@@ -138,57 +143,59 @@ module Consolle
 
       def handle_client(client)
         Thread.new do
+          # Read request
+          request_data = client.gets
+          return unless request_data
+
+          request = JSON.parse(request_data)
+          logger.debug "[ConsoleSocketServer] Request: #{request.inspect}"
+
+          # Process through broker
+          response = @broker.process_request(request)
+
+          # Send response
           begin
-            # Read request
-            request_data = client.gets
-            return unless request_data
-            
-            request = JSON.parse(request_data)
-            logger.debug "[ConsoleSocketServer] Request: #{request.inspect}"
-            
-            # Process through broker
-            response = @broker.process_request(request)
-            
-            # Send response
-            begin
-              client.write(JSON.generate(response))
-              client.write("\n")
-              client.flush
-            rescue Errno::EPIPE
-              # Client disconnected before we could send response
-              logger.debug "[ConsoleSocketServer] Client disconnected before response could be sent"
-            end
-          rescue JSON::ParserError => e
-            begin
-              error_response = {
-                "success" => false,
-                "error" => "InvalidRequest",
-                "message" => "Invalid JSON: #{e.message}"
-              }
-              client.write(JSON.generate(error_response))
-              client.write("\n")
-            rescue Errno::EPIPE
-              logger.debug "[ConsoleSocketServer] Client disconnected while sending JSON parse error"
-            end
-          rescue Errno::EPIPE => e
-            # Client disconnected, ignore
-            logger.debug "[ConsoleSocketServer] Client disconnected (Broken pipe)"
-          rescue StandardError => e
-            logger.error "[ConsoleSocketServer] Client handler error: #{e.message}"
-            begin
-              error_response = {
-                "success" => false,
-                "error" => e.class.name,
-                "message" => e.message
-              }
-              client.write(JSON.generate(error_response))
-              client.write("\n")
-            rescue Errno::EPIPE
-              # Client disconnected while sending error response
-              logger.debug "[ConsoleSocketServer] Client disconnected while sending error response"
-            end
-          ensure
-            client.close rescue nil
+            client.write(JSON.generate(response))
+            client.write("\n")
+            client.flush
+          rescue Errno::EPIPE
+            # Client disconnected before we could send response
+            logger.debug '[ConsoleSocketServer] Client disconnected before response could be sent'
+          end
+        rescue JSON::ParserError => e
+          begin
+            error_response = {
+              'success' => false,
+              'error' => 'InvalidRequest',
+              'message' => "Invalid JSON: #{e.message}"
+            }
+            client.write(JSON.generate(error_response))
+            client.write("\n")
+          rescue Errno::EPIPE
+            logger.debug '[ConsoleSocketServer] Client disconnected while sending JSON parse error'
+          end
+        rescue Errno::EPIPE
+          # Client disconnected, ignore
+          logger.debug '[ConsoleSocketServer] Client disconnected (Broken pipe)'
+        rescue StandardError => e
+          logger.error "[ConsoleSocketServer] Client handler error: #{e.message}"
+          begin
+            error_response = {
+              'success' => false,
+              'error' => e.class.name,
+              'message' => e.message
+            }
+            client.write(JSON.generate(error_response))
+            client.write("\n")
+          rescue Errno::EPIPE
+            # Client disconnected while sending error response
+            logger.debug '[ConsoleSocketServer] Client disconnected while sending error response'
+          end
+        ensure
+          begin
+            client.close
+          rescue StandardError
+            nil
           end
         end
       end
