@@ -183,6 +183,34 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
       expect(result[:output]).to eq('=> "안녕하세요, 세계!"')
     end
 
+    it 'handles various Korean strings without encoding issues' do
+      # Test simple Korean string
+      simple_code = '"안녕하세요"'
+      encoded_code = Base64.strict_encode64(simple_code)
+      eval_command = "eval(Base64.decode64('#{encoded_code}').force_encoding('UTF-8'), IRB.CurrentContext.workspace.binding)"
+      output_with_prompt = "#{eval_command}\n=> \"안녕하세요\"\nlua-home(dev)> "
+
+      read_count = 0
+      wait_readable_error = Class.new(StandardError) { include IO::WaitReadable }.new
+      allow(reader).to receive(:read_nonblock) do
+        read_count += 1
+        case read_count
+        when 1  # clear_buffer call
+          raise wait_readable_error
+        when 2  # first read gets the result
+          output_with_prompt
+        else    # subsequent reads
+          raise wait_readable_error
+        end
+      end
+
+      allow(IO).to receive(:select).and_return([[reader], [], []])
+
+      result = supervisor.eval(simple_code)
+      expect(result[:success]).to be true
+      expect(result[:output]).to eq('=> "안녕하세요"')
+    end
+
     xit 'properly displays output for multiline code ending with object' do
       # Mock tempfile
       tempfile = double('tempfile')
@@ -241,4 +269,5 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
       expect(timestamps.size).to be >= 1 # Added on initial start
     end
   end
+
 end

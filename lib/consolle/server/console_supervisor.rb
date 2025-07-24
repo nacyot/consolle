@@ -72,11 +72,31 @@ module Consolle
 
           # Encode code using Base64 to handle special characters and remote consoles
           # Ensure UTF-8 encoding to handle strings that may be tagged as ASCII-8BIT
-          utf8_code = code.encoding == Encoding::UTF_8 ? code : code.dup.force_encoding('UTF-8')
+          utf8_code = if code.encoding == Encoding::UTF_8
+                        code
+                      else
+                        # Try to handle ASCII-8BIT strings that might contain UTF-8 data
+                        temp = code.dup
+                        if code.encoding == Encoding::ASCII_8BIT
+                          # First try to interpret as UTF-8
+                          temp.force_encoding('UTF-8')
+                          if temp.valid_encoding?
+                            temp
+                          else
+                            # If not valid UTF-8, try other common encodings
+                            # or use replacement characters
+                            code.encode('UTF-8', invalid: :replace, undef: :replace)
+                          end
+                        else
+                          # For other encodings, convert to UTF-8
+                          code.encode('UTF-8')
+                        end
+                      end
           encoded_code = Base64.strict_encode64(utf8_code)
 
           # Use eval to execute the Base64-decoded code
-          eval_command = "eval(Base64.decode64('#{encoded_code}'), IRB.CurrentContext.workspace.binding)"
+          # Ensure decoded string is properly handled as UTF-8
+          eval_command = "eval(Base64.decode64('#{encoded_code}').force_encoding('UTF-8'), IRB.CurrentContext.workspace.binding)"
           logger.debug '[ConsoleSupervisor] Sending eval command (Base64 encoded)'
           @writer.puts eval_command
           @writer.flush
