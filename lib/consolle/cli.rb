@@ -11,6 +11,57 @@ require_relative "adapters/rails_console"
 
 module Consolle
   class CLI < Thor
+    package_name "Consolle"
+    
+    class << self
+      def start(given_args = ARGV, config = {})
+        # Intercept --help at the top level
+        if given_args == ["--help"] || given_args == ["-h"] || given_args.empty?
+          shell = Thor::Base.shell.new
+          help(shell)
+          return
+        end
+        super
+      end
+      
+      def help(shell, subcommand = false)
+        if subcommand == false
+          shell.say "Consolle - Rails console management tool", :cyan
+          shell.say
+          shell.say "USAGE:", :yellow
+          shell.say "  cone [COMMAND] [OPTIONS]"
+          shell.say
+          shell.say "COMMANDS:", :yellow
+          shell.say "  cone start              # Start Rails console in background"
+          shell.say "  cone stop               # Stop Rails console"
+          shell.say "  cone restart            # Restart Rails console"
+          shell.say "  cone status             # Show Rails console status"
+          shell.say "  cone exec CODE          # Execute Ruby code in Rails console"
+          shell.say "  cone ls                 # List active Rails console sessions"
+          shell.say "  cone stop_all           # Stop all Rails console sessions"
+          shell.say "  cone rule FILE          # Write cone command guide to FILE"
+          shell.say "  cone version            # Show version"
+          shell.say
+          shell.say "GLOBAL OPTIONS:", :yellow
+          shell.say "  -v, --verbose           # Enable verbose output"
+          shell.say "  -t, --target NAME       # Target session name (default: cone)"
+          shell.say "  -h, --help              # Show this help message"
+          shell.say
+          shell.say "EXAMPLES:", :yellow
+          shell.say "  cone exec 'User.count'                    # Execute code in default session"
+          shell.say "  cone start -t api -e production           # Start production console named 'api'"
+          shell.say "  cone exec -t api 'Rails.env'              # Execute code in 'api' session"
+          shell.say "  cone exec -f script.rb                    # Execute code from file"
+          shell.say
+          shell.say "For more information on a specific command:"
+          shell.say "  cone COMMAND --help"
+          shell.say
+        else
+          super
+        end
+      end
+    end
+    
     class_option :verbose, type: :boolean, aliases: "-v", desc: "Verbose output"
     class_option :target, type: :string, aliases: "-t", desc: "Target session name", default: "cone"
 
@@ -34,16 +85,21 @@ module Consolle
     end
     
 
-    default_task :default
-
-    desc "default", "Start console"
-    def default
-      start
-    end
+    # Remove default_task since we handle it in self.start
 
     desc "version", "Show consolle version"
     def version
       puts "Consolle version #{Consolle::VERSION}"
+    end
+
+    # Override help to use our custom help
+    desc "help [COMMAND]", "Show help"
+    def help(command = nil)
+      if command
+        self.class.command_help(shell, command)
+      else
+        self.class.help(shell)
+      end
     end
 
     desc "rule FILE", "Write cone command guide to FILE"
@@ -60,6 +116,18 @@ module Consolle
     end
 
     desc "start", "Start Rails console in background"
+    long_desc <<-LONGDESC
+      Starts a Rails console process in the background for the current Rails project.
+      The console runs as a daemon and can be accessed through the exec command.
+
+      You can specify a custom session name with --target to run multiple consoles:
+        cone start --target api --rails_env production
+        cone start --target worker --rails_env development
+
+      Custom console commands are supported for special environments:
+        cone start --command "kamal app exec -i 'bin/rails console'"
+        cone start --command "docker exec -it myapp bin/rails console"
+    LONGDESC
     method_option :rails_env, type: :string, aliases: "-e", desc: "Rails environment", default: "development"
     method_option :command, type: :string, aliases: "-c", desc: "Custom console command", default: "bin/rails console"
     def start
@@ -145,6 +213,21 @@ module Consolle
     end
 
     desc "ls", "List active Rails console sessions"
+    long_desc <<-LONGDESC
+      Lists all active Rails console sessions in the current project.
+      
+      Shows information about each session including:
+      - Session name (target)
+      - Process ID (PID)
+      - Rails environment
+      - Status (running/stopped)
+      
+      Example output:
+        Active sessions:
+        - cone (default)  [PID: 12345, ENV: development, STATUS: running]
+        - api             [PID: 12346, ENV: production, STATUS: running]
+        - worker          [PID: 12347, ENV: development, STATUS: stopped]
+    LONGDESC
     def ls
       ensure_rails_project!
       
@@ -282,6 +365,20 @@ module Consolle
     end
 
     desc "restart", "Restart Rails console"
+    long_desc <<-LONGDESC
+      Restarts the Rails console process.
+      
+      By default, only restarts the Rails console subprocess while keeping the 
+      socket server running. This is faster and maintains socket connections.
+      
+      Use --force to restart the entire server including the socket server:
+        cone restart           # Quick restart (subprocess only)
+        cone restart --force   # Full restart (entire server)
+        
+      Target specific sessions:
+        cone restart -t api
+        cone restart --target worker --force
+    LONGDESC
     method_option :rails_env, type: :string, aliases: "-e", desc: "Rails environment", default: "development"
     method_option :force, type: :boolean, aliases: "-f", desc: "Force restart the entire server"
     def restart
@@ -352,7 +449,27 @@ module Consolle
     end
 
     desc "exec CODE", "Execute Ruby code in Rails console"
-    method_option :timeout, type: :numeric, aliases: "-t", desc: "Timeout in seconds", default: 15
+    long_desc <<-LONGDESC
+      Executes Ruby code in the running Rails console and returns the result.
+      
+      Basic usage:
+        cone exec 'User.count'
+        cone exec 'Rails.env'
+        
+      Execute code from a file:
+        cone exec -f script.rb
+        cone exec --file complex_query.rb
+        
+      Set custom timeout for long-running operations:
+        cone exec 'User.where(active: true).update_all(status: "verified")' --timeout 60
+        
+      Target specific console sessions:
+        cone exec -t api 'Order.pending.count'
+        cone exec --target worker 'Job.failed.destroy_all'
+        
+      The console must be started first with 'cone start'.
+    LONGDESC
+    method_option :timeout, type: :numeric, desc: "Timeout in seconds", default: 15
     method_option :file, type: :string, aliases: "-f", desc: "Read Ruby code from FILE"
     method_option :raw, type: :boolean, desc: "Do not apply escape fixes for Claude Code (keep \\! as is)"
     def exec(*code_parts)
