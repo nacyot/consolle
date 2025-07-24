@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    consolle (0.2.4)
+    consolle (0.2.5)
       logger (~> 1.0)
       thor (~> 1.0)
 
