@@ -63,18 +63,12 @@ fi
 NEW_VERSION="$MAJOR.$MINOR.$PATCH"
 echo "New version: $NEW_VERSION"
 
-# Build the gem first with current version to ensure it builds successfully
-echo "Testing gem build with current version..."
-if ! gem build consolle.gemspec; then
-    echo "Error: Gem build failed with current version"
-    exit 1
-fi
-echo "Build test successful"
-
-# Test build gem is already cleaned up by initial cleanup
-
-# Update .version file
+# Update .version file FIRST
 echo "$NEW_VERSION" > .version
+
+# Update Gemfile.lock with new version
+echo "Updating Gemfile.lock..."
+bundle install
 
 # Build the gem with new version
 echo "Building gem with new version..."
@@ -83,7 +77,7 @@ if gem build consolle.gemspec; then
     
     # Git operations
     echo "Committing version bump..."
-    git add .version
+    git add .version Gemfile.lock
     git commit -m "Bump version to $NEW_VERSION"
     
     echo "Creating git tag..."
@@ -93,19 +87,34 @@ if gem build consolle.gemspec; then
     git push origin
     git push origin "v$NEW_VERSION"
     
-    echo "Publishing to GitHub Packages..."
-    if gem push --key github --host https://rubygems.pkg.github.com/nacyot consolle-$NEW_VERSION.gem; then
-        echo "✓ Gem published successfully to GitHub Packages"
-        echo "Release complete!"
-        echo "Version $NEW_VERSION has been released and published."
+    # Ask about publishing to RubyGems.org
+    echo ""
+    read -p "Publish to RubyGems.org? (y/N): " publish_confirm
+    
+    if [[ "$publish_confirm" =~ ^[Yy]$ ]]; then
+        echo "Publishing to RubyGems.org..."
+        if gem push consolle-$NEW_VERSION.gem; then
+            echo "✓ Gem published successfully to RubyGems.org"
+            echo ""
+            echo "View your gem at: https://rubygems.org/gems/consolle"
+        else
+            echo "Error: RubyGems.org push failed"
+            echo "You can manually publish with:"
+            echo "  gem push consolle-$NEW_VERSION.gem"
+            exit 1
+        fi
     else
-        echo "Warning: Git operations succeeded but gem push failed"
-        echo "You can manually publish with:"
-        echo "  gem push --key github --host https://rubygems.pkg.github.com/nacyot consolle-$NEW_VERSION.gem"
+        echo "Skipping RubyGems.org publishing."
+        echo "You can manually publish later with:"
+        echo "  gem push consolle-$NEW_VERSION.gem"
     fi
+    
+    echo "Release complete!"
+    echo "Version $NEW_VERSION has been released."
 else
     echo "Error: Gem build failed with new version"
     # Revert version change
     echo "$CURRENT_VERSION" > .version
+    bundle install  # Revert Gemfile.lock
     exit 1
 fi
