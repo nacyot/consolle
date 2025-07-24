@@ -142,6 +142,43 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
       expect(result[:success]).to be false
       expect(result[:output]).to include("timed out")
     end
+
+    it "handles Korean (UTF-8) strings correctly" do
+      # Create a proper exception for IO::WaitReadable
+      wait_readable_error = Class.new(StandardError) { include IO::WaitReadable }.new
+      
+      # Test Korean string that might be tagged as ASCII-8BIT
+      korean_code = '"안녕하세요, 세계!"'
+      # Force to ASCII-8BIT to simulate the issue
+      korean_code_binary = korean_code.dup.force_encoding('ASCII-8BIT')
+      
+      # Mock Base64 encoding with UTF-8 forced encoding
+      encoded_code = Base64.strict_encode64(korean_code_binary.force_encoding('UTF-8'))
+      
+      # Mock execution result
+      eval_command = "eval(Base64.decode64('#{encoded_code}'), IRB.CurrentContext.workspace.binding)"
+      output_with_prompt = "#{eval_command}\n=> \"안녕하세요, 세계!\"\nlua-home(dev)> "
+      
+      read_count = 0
+      allow(reader).to receive(:read_nonblock) do
+        read_count += 1
+        case read_count
+        when 1  # clear_buffer call
+          raise wait_readable_error
+        when 2  # first read gets the result
+          output_with_prompt
+        else    # subsequent reads
+          raise wait_readable_error
+        end
+      end
+
+      allow(IO).to receive(:select).and_return([[reader], [], []])
+
+      result = supervisor.eval(korean_code_binary)
+      
+      expect(result[:success]).to be true
+      expect(result[:output]).to eq('=> "안녕하세요, 세계!"')
+    end
     
     xit "properly displays output for multiline code ending with object" do
       # Mock tempfile

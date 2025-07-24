@@ -71,7 +71,9 @@ module Consolle
           end
           
           # Encode code using Base64 to handle special characters and remote consoles
-          encoded_code = Base64.strict_encode64(code)
+          # Ensure UTF-8 encoding to handle strings that may be tagged as ASCII-8BIT
+          utf8_code = code.encoding == Encoding::UTF_8 ? code : code.dup.force_encoding('UTF-8')
+          encoded_code = Base64.strict_encode64(utf8_code)
           
           # Use eval to execute the Base64-decoded code
           eval_command = "eval(Base64.decode64('#{encoded_code}'), IRB.CurrentContext.workspace.binding)"
