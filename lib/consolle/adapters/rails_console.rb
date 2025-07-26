@@ -257,14 +257,77 @@ module Consolle
 
       def wait_for_server(timeout: 10)
         deadline = Time.now + timeout
+        server_pid = nil
+        error_found = false
+        error_message = nil
+        last_check_time = Time.now
 
         while Time.now < deadline
-          return true if File.exist?(@socket_path) && get_status
+          # Always check log file for errors first
+          if File.exist?(@log_path)
+            log_content = File.read(@log_path)
+            if log_content.include?('[Server] Error:')
+              error_lines = log_content.lines.grep(/\[Server\] Error:/)
+              error_message = error_lines.last.strip if error_lines.any?
+              error_found = true
+              break
+            end
+          end
+
+          # Check if socket exists and server is responsive
+          if File.exist?(@socket_path)
+            status = get_status
+            if status && status['success'] && status['running']
+              # Double-check for errors in log one more time
+              if File.exist?(@log_path)
+                log_content = File.read(@log_path)
+                if log_content.include?('[Server] Error:')
+                  error_lines = log_content.lines.grep(/\[Server\] Error:/)
+                  error_message = error_lines.last.strip if error_lines.any?
+                  error_found = true
+                  break
+                end
+              end
+              return true
+            end
+          end
+
+          # Check if server process is still alive by checking pid file
+          if File.exist?(@pid_path)
+            server_pid ||= File.read(@pid_path).to_i
+            begin
+              Process.kill(0, server_pid)
+              # Process is alive, but check if it has been alive for at least 1 second
+              # to ensure it's not dying immediately after start
+              if Time.now - last_check_time > 1.0
+                last_check_time = Time.now
+                # Re-check log for errors that might have appeared
+                if File.exist?(@log_path)
+                  log_content = File.read(@log_path)
+                  if log_content.include?('[Server] Error:')
+                    error_lines = log_content.lines.grep(/\[Server\] Error:/)
+                    error_message = error_lines.last.strip if error_lines.any?
+                    error_found = true
+                    break
+                  end
+                end
+              end
+            rescue Errno::ESRCH
+              # Process died
+              error_message = "Server process died unexpectedly"
+              error_found = true
+              break
+            end
+          end
 
           sleep 0.1
         end
 
-        raise "Server failed to start within #{timeout} seconds"
+        if error_found
+          raise "Server failed to start: #{error_message || 'Unknown error'}"
+        else
+          raise "Server failed to start within #{timeout} seconds"
+        end
       end
 
       def send_request(request, timeout: 30)
