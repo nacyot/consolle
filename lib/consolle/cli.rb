@@ -126,9 +126,13 @@ module Consolle
       Custom console commands are supported for special environments:
         cone start --command "kamal app exec -i 'bin/rails console'"
         cone start --command "docker exec -it myapp bin/rails console"
+      
+      For SSH-based commands that require authentication (e.g., 1Password SSH agent):
+        cone start --command "kamal console" --wait-timeout 60
     LONGDESC
     method_option :rails_env, type: :string, aliases: '-e', desc: 'Rails environment', default: 'development'
     method_option :command, type: :string, aliases: '-c', desc: 'Custom console command', default: 'bin/rails console'
+    method_option :wait_timeout, type: :numeric, aliases: '-w', desc: 'Timeout for console startup (seconds)', default: 15
     def start
       ensure_rails_project!
       ensure_project_directories
@@ -155,7 +159,7 @@ module Consolle
         clear_session_info
       end
 
-      adapter = create_rails_adapter(options[:rails_env], options[:target], options[:command])
+      adapter = create_rails_adapter(options[:rails_env], options[:target], options[:command], options[:wait_timeout])
 
       puts 'Starting Rails console...'
 
@@ -644,7 +648,7 @@ module Consolle
       File.join(Dir.pwd, 'tmp', 'cone', 'sessions.json')
     end
 
-    def create_rails_adapter(rails_env = 'development', target = nil, command = nil)
+    def create_rails_adapter(rails_env = 'development', target = nil, command = nil, wait_timeout = nil)
       target ||= options[:target]
 
       Consolle::Adapters::RailsConsole.new(
@@ -654,7 +658,8 @@ module Consolle
         rails_root: Dir.pwd,
         rails_env: rails_env,
         verbose: options[:verbose],
-        command: command
+        command: command,
+        wait_timeout: wait_timeout
       )
     end
 

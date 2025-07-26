@@ -27,11 +27,12 @@ module Consolle
       PROMPT_PATTERN = /^[^\w]*(\u001E\u001F<CONSOLLE>\u001F\u001E|\w+[-_]?\w*\([^)]*\)>|irb\([^)]+\):\d+:?\d*[>*]|>>|>)\s*$/
       CTRL_C = "\x03"
 
-      def initialize(rails_root:, rails_env: 'development', logger: nil, command: nil)
+      def initialize(rails_root:, rails_env: 'development', logger: nil, command: nil, wait_timeout: nil)
         @rails_root = rails_root
         @rails_env = rails_env
         @command = command || 'bin/rails console'
         @logger = logger || Logger.new(STDOUT)
+        @wait_timeout = wait_timeout || 15
         @pid = nil
         @reader = nil
         @writer = nil
@@ -280,7 +281,7 @@ module Consolle
         trim_restart_history
 
         # Wait for initial prompt
-        wait_for_prompt(timeout: 15)
+        wait_for_prompt(timeout: @wait_timeout)
 
         # Configure IRB settings for automation
         configure_irb_for_automation

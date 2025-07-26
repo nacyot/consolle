@@ -12,7 +12,7 @@ module Consolle
       attr_reader :socket_path, :process_pid, :pid_path, :log_path
 
       def initialize(socket_path: nil, pid_path: nil, log_path: nil, rails_root: nil, rails_env: nil, verbose: false,
-                     command: nil)
+                     command: nil, wait_timeout: nil)
         @socket_path = socket_path || default_socket_path
         @pid_path = pid_path || default_pid_path
         @log_path = log_path || default_log_path
@@ -20,6 +20,7 @@ module Consolle
         @rails_env = rails_env || 'development'
         @verbose = verbose
         @command = command || 'bin/rails console'
+        @wait_timeout = wait_timeout || 15
         @server_pid = nil
       end
 
@@ -30,7 +31,7 @@ module Consolle
         start_server_daemon
 
         # Wait for server to be ready
-        wait_for_server(timeout: 10)
+        wait_for_server(timeout: @wait_timeout)
 
         # Get server status
         status = get_status
@@ -146,7 +147,8 @@ module Consolle
           @verbose ? 'debug' : 'info',
           @pid_path,
           @log_path,
-          @command
+          @command,
+          @wait_timeout.to_s
         ]
       end
 
@@ -156,7 +158,8 @@ module Consolle
             require 'consolle/server/console_socket_server'
             require 'logger'
           #{'  '}
-            socket_path, rails_root, rails_env, log_level, pid_path, log_path, command = ARGV
+            socket_path, rails_root, rails_env, log_level, pid_path, log_path, command, wait_timeout_str = ARGV
+            wait_timeout = wait_timeout_str ? wait_timeout_str.to_i : nil
           #{'  '}
             # Write initial log
             log_file = log_path || socket_path.sub(/\\.socket$/, '.log')
@@ -186,7 +189,8 @@ module Consolle
               rails_root: rails_root,
               rails_env: rails_env,
               logger: logger,
-              command: command
+              command: command,
+              wait_timeout: wait_timeout
             )
           #{'  '}
             puts "[Server] Starting server with log level: \#{log_level}..."
@@ -199,6 +203,17 @@ module Consolle
           rescue => e
             puts "[Server] Error: \#{e.class}: \#{e.message}"
             puts e.backtrace.join("\\n")
+            
+            # Clean up socket file if it exists
+            if defined?(socket_path) && socket_path && File.exist?(socket_path)
+              File.unlink(socket_path) rescue nil
+            end
+            
+            # Clean up PID file if it exists
+            if defined?(pid_file) && pid_file && File.exist?(pid_file)
+              File.unlink(pid_file) rescue nil
+            end
+            
             exit 1
           end
         RUBY
@@ -213,8 +228,8 @@ module Consolle
         log_file = @log_path
         pid = Process.spawn(
           *server_command,
-          out: log_file,
-          err: log_file
+          out: [log_file, 'a'],
+          err: [log_file, 'a']
         )
 
         Process.detach(pid)
@@ -255,68 +270,80 @@ module Consolle
         File.unlink(pid_file) if File.exist?(pid_file)
       end
 
-      def wait_for_server(timeout: 10)
+      def wait_for_server(timeout: 15)
         deadline = Time.now + timeout
         server_pid = nil
         error_found = false
         error_message = nil
-        last_check_time = Time.now
+        last_log_check = Time.now
+        ssh_auth_detected = false
+
+        puts "Waiting for console to start (timeout: #{timeout}s)..." if @verbose
 
         while Time.now < deadline
-          # Always check log file for errors first
-          if File.exist?(@log_path)
-            log_content = File.read(@log_path)
-            if log_content.include?('[Server] Error:')
-              error_lines = log_content.lines.grep(/\[Server\] Error:/)
-              error_message = error_lines.last.strip if error_lines.any?
-              error_found = true
-              break
-            end
-          end
-
-          # Check if socket exists and server is responsive
-          if File.exist?(@socket_path)
-            status = get_status
-            if status && status['success'] && status['running']
-              # Double-check for errors in log one more time
-              if File.exist?(@log_path)
-                log_content = File.read(@log_path)
-                if log_content.include?('[Server] Error:')
-                  error_lines = log_content.lines.grep(/\[Server\] Error:/)
-                  error_message = error_lines.last.strip if error_lines.any?
-                  error_found = true
-                  break
-                end
-              end
-              return true
-            end
-          end
-
           # Check if server process is still alive by checking pid file
           if File.exist?(@pid_path)
             server_pid ||= File.read(@pid_path).to_i
             begin
               Process.kill(0, server_pid)
-              # Process is alive, but check if it has been alive for at least 1 second
-              # to ensure it's not dying immediately after start
-              if Time.now - last_check_time > 1.0
-                last_check_time = Time.now
-                # Re-check log for errors that might have appeared
-                if File.exist?(@log_path)
-                  log_content = File.read(@log_path)
-                  if log_content.include?('[Server] Error:')
-                    error_lines = log_content.lines.grep(/\[Server\] Error:/)
-                    error_message = error_lines.last.strip if error_lines.any?
-                    error_found = true
-                    break
-                  end
-                end
-              end
+              # Process is alive
             rescue Errno::ESRCH
-              # Process died
-              error_message = "Server process died unexpectedly"
+              # Process died - check log for error
+              if File.exist?(@log_path)
+                log_content = File.read(@log_path)
+                if log_content.include?('[Server] Error:')
+                  error_lines = log_content.lines.grep(/\[Server\] Error:/)
+                  error_message = error_lines.last.strip if error_lines.any?
+                else
+                  error_message = "Server process died unexpectedly"
+                end
+              else
+                error_message = "Server process died unexpectedly"
+              end
               error_found = true
               break
+            end
+          end
+
+          # Check log file periodically for errors or SSH auth messages
+          if Time.now - last_log_check > 0.5
+            last_log_check = Time.now
+            if File.exist?(@log_path)
+              log_content = File.read(@log_path)
+              
+              # Check for explicit errors
+              if log_content.include?('[Server] Error:')
+                error_lines = log_content.lines.grep(/\[Server\] Error:/)
+                error_message = error_lines.last.strip if error_lines.any?
+                error_found = true
+                break
+              end
+              
+              # Check for SSH authentication messages
+              if !ssh_auth_detected && (log_content.include?('SSH') || 
+                                       log_content.include?('ssh') || 
+                                       log_content.include?('Authenticating') ||
+                                       log_content.include?('authentication') ||
+                                       log_content.include?('1Password') ||
+                                       @command.include?('kamal') ||
+                                       @command.include?('ssh'))
+                ssh_auth_detected = true
+                puts "SSH authentication detected, extending timeout..." if @verbose
+                # Extend deadline for SSH auth
+                deadline = Time.now + [timeout, 60].max
+              end
+            end
+          end
+
+          # Check if socket exists and server is responsive
+          if File.exist?(@socket_path)
+            begin
+              status = get_status
+              if status && status['success'] && status['running']
+                return true
+              end
+            rescue StandardError
+              # Socket exists but not ready yet, continue waiting
             end
           end
 
@@ -326,7 +353,9 @@ module Consolle
         if error_found
           raise "Server failed to start: #{error_message || 'Unknown error'}"
         else
-          raise "Server failed to start within #{timeout} seconds"
+          timeout_msg = "Server failed to start within #{timeout} seconds"
+          timeout_msg += " (SSH authentication may be required)" if ssh_auth_detected || @command.include?('ssh') || @command.include?('kamal')
+          raise timeout_msg
         end
       end
 

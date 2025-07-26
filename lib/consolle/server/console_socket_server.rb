@@ -12,11 +12,12 @@ module Consolle
     class ConsoleSocketServer
       attr_reader :socket_path, :logger
 
-      def initialize(socket_path:, rails_root:, rails_env: 'development', logger: nil, command: nil)
+      def initialize(socket_path:, rails_root:, rails_env: 'development', logger: nil, command: nil, wait_timeout: nil)
         @socket_path = socket_path
         @rails_root = rails_root
         @rails_env = rails_env
         @command = command || 'bin/rails console'
+        @wait_timeout = wait_timeout
         @logger = logger || begin
           log = Logger.new(STDOUT)
           log.level = Logger::DEBUG
@@ -100,7 +101,8 @@ module Consolle
           rails_root: @rails_root,
           rails_env: @rails_env,
           logger: @logger,
-          command: @command
+          command: @command,
+          wait_timeout: @wait_timeout
         )
       end
 
