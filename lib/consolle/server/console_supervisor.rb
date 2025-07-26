@@ -4,6 +4,7 @@ require 'pty'
 require 'timeout'
 require 'fcntl'
 require 'logger'
+require_relative '../constants'
 require_relative '../errors'
 
 # Ruby 3.4.0+ extracts base64 as a default gem
@@ -32,7 +33,7 @@ module Consolle
         @rails_env = rails_env
         @command = command || 'bin/rails console'
         @logger = logger || Logger.new(STDOUT)
-        @wait_timeout = wait_timeout || 15
+        @wait_timeout = wait_timeout || Consolle::DEFAULT_WAIT_TIMEOUT
         @pid = nil
         @reader = nil
         @writer = nil
@@ -387,12 +388,17 @@ module Consolle
 
       def wait_for_prompt(timeout: 15, consume_all: false)
         output = +''
-        deadline = Time.now + timeout
+        start_time = Time.now
+        deadline = start_time + timeout
         prompt_found = false
         last_data_time = Time.now
 
+        logger.info "[ConsoleSupervisor] Waiting for prompt with timeout: #{timeout}s (deadline: #{deadline}, now: #{start_time})"
+
         loop do
-          if Time.now > deadline
+          current_time = Time.now
+          if current_time > deadline
+            logger.error "[ConsoleSupervisor] Timeout reached. Current: #{current_time}, Deadline: #{deadline}, Elapsed: #{current_time - start_time}s"
             logger.error "[ConsoleSupervisor] Output so far: #{output.inspect}"
             logger.error "[ConsoleSupervisor] Stripped: #{strip_ansi(output).inspect}"
             raise Timeout::Error, "No prompt after #{timeout} seconds"

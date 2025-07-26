@@ -5,6 +5,7 @@ require 'json'
 require 'timeout'
 require 'securerandom'
 require 'fileutils'
+require_relative '../constants'
 
 module Consolle
   module Adapters
@@ -20,7 +21,7 @@ module Consolle
         @rails_env = rails_env || 'development'
         @verbose = verbose
         @command = command || 'bin/rails console'
-        @wait_timeout = wait_timeout || 15
+        @wait_timeout = wait_timeout || Consolle::DEFAULT_WAIT_TIMEOUT
         @server_pid = nil
       end
 
@@ -270,13 +271,20 @@ module Consolle
         File.unlink(pid_file) if File.exist?(pid_file)
       end
 
-      def wait_for_server(timeout: 15)
+      def wait_for_server(timeout: Consolle::DEFAULT_WAIT_TIMEOUT)
         deadline = Time.now + timeout
         server_pid = nil
         error_found = false
         error_message = nil
         last_log_check = Time.now
         ssh_auth_detected = false
+        
+        # Record the initial log file position to avoid reading old errors
+        initial_log_pos = if File.exist?(@log_path)
+                           File.size(@log_path)
+                         else
+                           0
+                         end
 
         puts "Waiting for console to start (timeout: #{timeout}s)..." if @verbose
 
@@ -290,12 +298,15 @@ module Consolle
             rescue Errno::ESRCH
               # Process died - check log for error
               if File.exist?(@log_path)
-                log_content = File.read(@log_path)
-                if log_content.include?('[Server] Error:')
-                  error_lines = log_content.lines.grep(/\[Server\] Error:/)
-                  error_message = error_lines.last.strip if error_lines.any?
-                else
-                  error_message = "Server process died unexpectedly"
+                File.open(@log_path, 'r') do |f|
+                  f.seek(initial_log_pos)
+                  log_content = f.read
+                  if log_content.include?('[Server] Error:')
+                    error_lines = log_content.lines.grep(/\[Server\] Error:/)
+                    error_message = error_lines.last.strip if error_lines.any?
+                  else
+                    error_message = "Server process died unexpectedly"
+                  end
                 end
               else
                 error_message = "Server process died unexpectedly"
@@ -308,29 +319,32 @@ module Consolle
           # Check log file periodically for errors or SSH auth messages
           if Time.now - last_log_check > 0.5
             last_log_check = Time.now
-            if File.exist?(@log_path)
-              log_content = File.read(@log_path)
-              
-              # Check for explicit errors
-              if log_content.include?('[Server] Error:')
-                error_lines = log_content.lines.grep(/\[Server\] Error:/)
-                error_message = error_lines.last.strip if error_lines.any?
-                error_found = true
-                break
-              end
-              
-              # Check for SSH authentication messages
-              if !ssh_auth_detected && (log_content.include?('SSH') || 
-                                       log_content.include?('ssh') || 
-                                       log_content.include?('Authenticating') ||
-                                       log_content.include?('authentication') ||
-                                       log_content.include?('1Password') ||
-                                       @command.include?('kamal') ||
-                                       @command.include?('ssh'))
-                ssh_auth_detected = true
-                puts "SSH authentication detected, extending timeout..." if @verbose
-                # Extend deadline for SSH auth
-                deadline = Time.now + [timeout, 60].max
+            if File.exist?(@log_path) && File.size(@log_path) > initial_log_pos
+              File.open(@log_path, 'r') do |f|
+                f.seek(initial_log_pos)
+                log_content = f.read
+                
+                # Check for explicit errors
+                if log_content.include?('[Server] Error:')
+                  error_lines = log_content.lines.grep(/\[Server\] Error:/)
+                  error_message = error_lines.last.strip if error_lines.any?
+                  error_found = true
+                  break
+                end
+                
+                # Check for SSH authentication messages
+                if !ssh_auth_detected && (log_content.include?('SSH') || 
+                                         log_content.include?('ssh') || 
+                                         log_content.include?('Authenticating') ||
+                                         log_content.include?('authentication') ||
+                                         log_content.include?('1Password') ||
+                                         @command.include?('kamal') ||
+                                         @command.include?('ssh'))
+                  ssh_auth_detected = true
+                  puts "SSH authentication detected, extending timeout..." if @verbose
+                  # Extend deadline for SSH auth
+                  deadline = Time.now + [timeout, 60].max
+                end
               end
             end
           end

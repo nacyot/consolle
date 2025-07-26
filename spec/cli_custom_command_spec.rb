@@ -38,7 +38,8 @@ RSpec.describe Consolle::CLI do
         expect(cli).to receive(:create_rails_adapter).with(
           'development',
           'test',
-          'bin/rails console'
+          'bin/rails console',
+          nil
         ).and_return(adapter)
 
         cli.start
@@ -59,7 +60,8 @@ RSpec.describe Consolle::CLI do
         expect(cli).to receive(:create_rails_adapter).with(
           'development',
           'test',
-          'bundle exec rails console'
+          'bundle exec rails console',
+          nil
         ).and_return(adapter)
 
         cli.start
@@ -80,7 +82,8 @@ RSpec.describe Consolle::CLI do
         expect(cli).to receive(:create_rails_adapter).with(
           'production',
           'kamal',
-          'docker exec -it app-web-123 bin/rails console'
+          'docker exec -it app-web-123 bin/rails console',
+          nil
         ).and_return(adapter)
 
         cli.start

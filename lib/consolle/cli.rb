@@ -7,6 +7,7 @@ require 'socket'
 require 'timeout'
 require 'securerandom'
 require 'date'
+require_relative 'constants'
 require_relative 'adapters/rails_console'
 
 module Consolle
@@ -132,7 +133,7 @@ module Consolle
     LONGDESC
     method_option :rails_env, type: :string, aliases: '-e', desc: 'Rails environment', default: 'development'
     method_option :command, type: :string, aliases: '-c', desc: 'Custom console command', default: 'bin/rails console'
-    method_option :wait_timeout, type: :numeric, aliases: '-w', desc: 'Timeout for console startup (seconds)', default: 15
+    method_option :wait_timeout, type: :numeric, aliases: '-w', desc: 'Timeout for console startup (seconds)', default: Consolle::DEFAULT_WAIT_TIMEOUT
     def start
       ensure_rails_project!
       ensure_project_directories

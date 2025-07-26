@@ -47,6 +47,11 @@ RSpec.describe Consolle::Adapters::RailsConsole do
         # Mock Process.kill to simulate dead process
         allow(Process).to receive(:kill).with(0, 99999).and_raise(Errno::ESRCH)
         
+        # Simulate that log file doesn't exist initially
+        allow(File).to receive(:exist?).and_call_original
+        allow(File).to receive(:exist?).with(log_path).and_return(false, true)
+        allow(File).to receive(:size).with(log_path).and_return(0)
+        
         expect {
           adapter.send(:wait_for_server, timeout: 1)
         }.to raise_error(RuntimeError, /Server failed to start: \[Server\] Error: Timeout::Error: No prompt after 15 seconds/)
