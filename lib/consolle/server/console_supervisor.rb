@@ -4,7 +4,7 @@ require 'pty'
 require 'timeout'
 require 'fcntl'
 require 'logger'
-require 'consolle/errors'
+require_relative '../errors'
 
 # Ruby 3.4.0+ extracts base64 as a default gem
 # Suppress warning by silencing verbose mode temporarily
