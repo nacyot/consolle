@@ -144,6 +144,9 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
       expect(writer).to have_received(:write).with("\x03").at_least(:once)
       expect(result[:success]).to be false
       expect(result[:output]).to include('timed out')
+      expect(result[:error_class]).to eq('Consolle::Errors::ExecutionTimeout')
+      expect(result[:error_code]).to eq('EXECUTION_TIMEOUT')
+      expect(result[:execution_time]).to eq(0.1)
     end
 
     it 'handles Korean (UTF-8) strings correctly' do
@@ -245,6 +248,92 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
 
       expect(result[:success]).to be true
       expect(result[:output]).not_to be_empty
+    end
+
+    describe 'error response format' do
+      it 'includes error_class and error_code for syntax errors' do
+        # Mock execution with syntax error
+        eval_command = "eval(Base64.decode64('ZGVmIGZvbw==').force_encoding('UTF-8'), IRB.CurrentContext.workspace.binding)"
+        error_output = "#{eval_command}\nSyntaxError: (eval):1: syntax error, unexpected end-of-input\nlua-home(dev)> "
+        
+        wait_readable_error = Class.new(StandardError) { include IO::WaitReadable }.new
+        read_count = 0
+        allow(reader).to receive(:read_nonblock) do
+          read_count += 1
+          case read_count
+          when 1  # clear_buffer call
+            raise wait_readable_error
+          when 2  # first read gets the error
+            error_output
+          else
+            raise wait_readable_error
+          end
+        end
+
+        allow(IO).to receive(:select).and_return([[reader], [], []])
+        result = supervisor.eval('def foo')
+
+        expect(result[:success]).to be false
+        expect(result[:output]).to include('syntax error')
+        expect(result[:error_class]).to eq('SyntaxError')
+        expect(result[:error_code]).to eq('SYNTAX_ERROR')
+      end
+
+      it 'includes error_class and error_code for runtime errors' do
+        # Mock execution with runtime error
+        eval_command = "eval(Base64.decode64('MS8w').force_encoding('UTF-8'), IRB.CurrentContext.workspace.binding)"
+        error_output = "#{eval_command}\nZeroDivisionError: divided by 0\nlua-home(dev)> "
+        
+        wait_readable_error = Class.new(StandardError) { include IO::WaitReadable }.new
+        read_count = 0
+        allow(reader).to receive(:read_nonblock) do
+          read_count += 1
+          case read_count
+          when 1  # clear_buffer call
+            raise wait_readable_error
+          when 2  # first read gets the error
+            error_output
+          else
+            raise wait_readable_error
+          end
+        end
+
+        allow(IO).to receive(:select).and_return([[reader], [], []])
+        result = supervisor.eval('1/0')
+
+        expect(result[:success]).to be false
+        expect(result[:output]).to include('divided by 0')
+        expect(result[:error_class]).to eq('ZeroDivisionError')
+        expect(result[:error_code]).to eq('ZERO_DIVISION_ERROR')
+      end
+
+      it 'includes error_class and error_code for load errors' do
+        # Mock execution with load error
+        eval_command = "eval(Base64.decode64('cmVxdWlyZSAnaG9saWRheXMn').force_encoding('UTF-8'), IRB.CurrentContext.workspace.binding)"
+        error_output = "#{eval_command}\nLoadError: cannot load such file -- holidays\nlua-home(dev)> "
+        
+        wait_readable_error = Class.new(StandardError) { include IO::WaitReadable }.new
+        read_count = 0
+        allow(reader).to receive(:read_nonblock) do
+          read_count += 1
+          case read_count
+          when 1  # clear_buffer call
+            raise wait_readable_error
+          when 2  # first read gets the error
+            error_output
+          else
+            raise wait_readable_error
+          end
+        end
+
+        allow(IO).to receive(:select).and_return([[reader], [], []])
+        result = supervisor.eval("require 'holidays'")
+
+        expect(result[:success]).to be false
+        expect(result[:output]).to include('cannot load such file')
+        expect(result[:error_class]).to eq('LoadError')
+        expect(result[:error_code]).to eq('LOAD_ERROR')
+      end
     end
   end
 
