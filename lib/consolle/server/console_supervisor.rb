@@ -123,6 +123,13 @@ module Consolle
                 chunk = @reader.read_nonblock(4096)
                 output << chunk
 
+                # Respond to cursor position request during command execution
+                if chunk.include?("\e[6n")
+                  logger.debug "[ConsoleSupervisor] Detected cursor position request during eval, sending response"
+                  @writer.write("\e[1;1R")
+                  @writer.flush
+                end
+
                 # Check if we got prompt back
                 clean = strip_ansi(output)
                 if clean.match?(PROMPT_PATTERN)
@@ -456,7 +463,13 @@ module Consolle
         3.times do |i|
           begin
             loop do
-              @reader.read_nonblock(4096)
+              chunk = @reader.read_nonblock(4096)
+              # Respond to cursor position request even while clearing buffer
+              if chunk.include?("\e[6n")
+                logger.debug "[ConsoleSupervisor] Detected cursor position request during clear_buffer, sending response"
+                @writer.write("\e[1;1R")
+                @writer.flush
+              end
             end
           rescue IO::WaitReadable, Errno::EIO
             # Buffer cleared for this iteration
