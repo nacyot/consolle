@@ -172,11 +172,18 @@ module Consolle
             'execution_time' => result[:execution_time]
           }
         else
-          {
+          response = {
             'success' => false,
-            'error' => 'ExecutionError',
+            'error' => result[:error_code] || 'ExecutionError',  # Use error_code for backward compatibility
             'message' => result[:output]
           }
+          
+          # Add new fields if present
+          response['error_class'] = result[:error_class] if result[:error_class]
+          response['error_code'] = result[:error_code] if result[:error_code]
+          response['execution_time'] = result[:execution_time] if result[:execution_time]
+          
+          response
         end
       end
 
