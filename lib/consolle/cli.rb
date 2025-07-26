@@ -553,9 +553,20 @@ module Consolle
         puts result['result'] unless result['result'].nil?
         puts "Execution time: #{result['execution_time']}s" if options[:verbose] && result['execution_time']
       else
-        puts "Error: #{result['error']}"
+        # Display error information
+        if result['error_code']
+          puts "Error: #{result['error_code']}"
+        else
+          puts "Error: #{result['error']}"
+        end
+        
+        # Show error class in verbose mode
+        if options[:verbose] && result['error_class']
+          puts "Error Class: #{result['error_class']}"
+        end
+        
         puts result['message']
-        puts result['backtrace']&.join("\n") if options[:verbose]
+        puts result['backtrace']&.join("\n") if options[:verbose] && result['backtrace']
         exit 1
       end
     end
