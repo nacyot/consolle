@@ -4,6 +4,7 @@ require 'pty'
 require 'timeout'
 require 'fcntl'
 require 'logger'
+require 'consolle/errors'
 
 # Ruby 3.4.0+ extracts base64 as a default gem
 # Suppress warning by silencing verbose mode temporarily
@@ -94,9 +95,9 @@ module Consolle
                       end
           encoded_code = Base64.strict_encode64(utf8_code)
 
-          # Use eval to execute the Base64-decoded code
+          # Use eval to execute the Base64-decoded code with exception handling
           # Ensure decoded string is properly handled as UTF-8
-          eval_command = "eval(Base64.decode64('#{encoded_code}').force_encoding('UTF-8'), IRB.CurrentContext.workspace.binding)"
+          eval_command = "begin; eval(Base64.decode64('#{encoded_code}').force_encoding('UTF-8'), IRB.CurrentContext.workspace.binding); rescue Exception => e; puts \"\#{e.class}: \#{e.message}\"; nil; end"
           logger.debug '[ConsoleSupervisor] Sending eval command (Base64 encoded)'
           @writer.puts eval_command
           @writer.flush
@@ -113,11 +114,7 @@ module Consolle
                 @writer.flush
                 sleep 0.5
                 clear_buffer
-                return {
-                  success: false,
-                  output: "Execution timed out after #{timeout} seconds",
-                  execution_time: timeout
-                }
+                return build_timeout_response(timeout)
               end
 
               begin
@@ -142,25 +139,29 @@ module Consolle
                 # PTY can throw EIO when no data available
                 IO.select([@reader], nil, nil, 0.1)
               rescue EOFError
-                return {
-                  success: false,
-                  output: 'Console terminated',
+                return build_error_response(
+                  EOFError.new('Console terminated'),
                   execution_time: nil
-                }
+                )
               end
             end
 
             # Parse and return result
-            result = parse_output(output, eval_command)
+            parsed_result = parse_output(output, eval_command)
 
             # Log for debugging object output issues
             logger.debug "[ConsoleSupervisor] Raw output: #{output.inspect}"
-            logger.debug "[ConsoleSupervisor] Parsed result: #{result.inspect}"
+            logger.debug "[ConsoleSupervisor] Parsed result: #{parsed_result.inspect}"
 
-            { success: true, output: result, execution_time: nil }
+            # Check if the output contains an error
+            if parsed_result.is_a?(Hash) && parsed_result[:error]
+              build_error_response(parsed_result[:exception], execution_time: nil)
+            else
+              { success: true, output: parsed_result, execution_time: nil }
+            end
           rescue StandardError => e
             logger.error "[ConsoleSupervisor] Eval error: #{e.message}"
-            { success: false, output: "Error: #{e.message}", execution_time: nil }
+            build_error_response(e, execution_time: nil)
           end
         end
       end
@@ -203,6 +204,39 @@ module Consolle
       end
 
       private
+
+      def build_timeout_response(timeout_seconds)
+        error = Consolle::Errors::ExecutionTimeout.new(timeout_seconds)
+        {
+          success: false,
+          error_class: error.class.name,
+          error_code: Consolle::Errors::ErrorClassifier.to_code(error),
+          output: error.message,
+          execution_time: timeout_seconds
+        }
+      end
+
+      def build_error_response(exception, execution_time: nil)
+        # Handle string messages that come from eval output parsing
+        if exception.is_a?(String)
+          error_code = Consolle::Errors::ErrorClassifier.classify_message(exception)
+          return {
+            success: false,
+            error_class: 'RuntimeError',
+            error_code: error_code,
+            output: exception,
+            execution_time: execution_time
+          }
+        end
+
+        {
+          success: false,
+          error_class: exception.class.name,
+          error_code: Consolle::Errors::ErrorClassifier.to_code(exception),
+          output: "#{exception.class}: #{exception.message}",
+          execution_time: execution_time
+        }
+      end
 
       def spawn_console
         env = {
@@ -490,6 +524,7 @@ module Consolle
         lines = clean.lines
         result_lines = []
         skip_echo = true
+        error_exception = nil
 
         lines.each_with_index do |line, idx|
           # Skip the eval command echo (both file-based and Base64)
@@ -509,12 +544,43 @@ module Consolle
             next
           end
 
+          # Check for error patterns
+          if !error_exception && line.match?(/^(.*Error|.*Exception):/)
+            error_match = line.match(/^((?:\w+::)*\w*(?:Error|Exception)):\s*(.*)/)
+            if error_match
+              error_class = error_match[1]
+              error_message = error_match[2]
+              
+              # Try to create the actual exception object
+              begin
+                # Handle namespaced errors
+                if error_class.include?('::')
+                  parts = error_class.split('::')
+                  klass = Object
+                  parts.each { |part| klass = klass.const_get(part) }
+                  error_exception = klass.new(error_message)
+                else
+                  # Try core Ruby error classes
+                  error_exception = Object.const_get(error_class).new(error_message)
+                end
+              rescue NameError
+                # If we can't find the exact error class, use a generic RuntimeError
+                error_exception = RuntimeError.new("#{error_class}: #{error_message}")
+              end
+            end
+          end
+
           # Collect all other lines (including return values and side effects)
           result_lines << line
         end
 
-        # Join all lines - this includes both side effects and return values
-        result_lines.join.strip
+        # If an error was detected, return it as a hash
+        if error_exception
+          { error: true, exception: error_exception, output: result_lines.join.strip }
+        else
+          # Join all lines - this includes both side effects and return values
+          result_lines.join.strip
+        end
       end
 
       def trim_restart_history
