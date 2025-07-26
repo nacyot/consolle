@@ -318,6 +318,13 @@ module Consolle
               chunk = @reader.read_nonblock(4096)
               output << chunk
               marker_found = output.include?(marker)
+              
+              # Respond to cursor position request during initialization
+              if chunk.include?("\e[6n")
+                logger.debug "[ConsoleSupervisor] Detected cursor position request during init, sending response"
+                @writer.write("\e[1;1R")
+                @writer.flush
+              end
             rescue IO::WaitReadable
               IO.select([@reader], nil, nil, 0.1)
             rescue Errno::EIO
@@ -419,6 +426,13 @@ module Consolle
             output << chunk
             last_data_time = Time.now
             logger.debug "[ConsoleSupervisor] Got chunk: #{chunk.inspect}"
+
+            # Respond to cursor position request (ESC[6n)
+            if chunk.include?("\e[6n")
+              logger.debug "[ConsoleSupervisor] Detected cursor position request, sending response"
+              @writer.write("\e[1;1R")  # Report cursor at position 1,1
+              @writer.flush
+            end
 
             clean = strip_ansi(output)
             # Check each line for prompt pattern
