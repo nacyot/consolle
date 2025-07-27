@@ -51,6 +51,9 @@ module Consolle
         @mutex.synchronize do
           raise 'Console is not running' unless running?
 
+          # Record start time for execution measurement
+          start_time = Time.now
+
           # Check if this is a remote console
           is_remote = @command.include?('ssh') || @command.include?('kamal') || @command.include?('docker')
 
@@ -116,6 +119,7 @@ module Consolle
                 @writer.flush
                 sleep 0.5
                 clear_buffer
+                execution_time = Time.now - start_time
                 return build_timeout_response(timeout)
               end
 
@@ -148,9 +152,10 @@ module Consolle
                 # PTY can throw EIO when no data available
                 IO.select([@reader], nil, nil, 0.1)
               rescue EOFError
+                execution_time = Time.now - start_time
                 return build_error_response(
                   EOFError.new('Console terminated'),
-                  execution_time: nil
+                  execution_time: execution_time
                 )
               end
             end
@@ -162,15 +167,19 @@ module Consolle
             logger.debug "[ConsoleSupervisor] Raw output: #{output.inspect}"
             logger.debug "[ConsoleSupervisor] Parsed result: #{parsed_result.inspect}"
 
+            # Calculate execution time
+            execution_time = Time.now - start_time
+
             # Check if the output contains an error
             if parsed_result.is_a?(Hash) && parsed_result[:error]
-              build_error_response(parsed_result[:exception], execution_time: nil)
+              build_error_response(parsed_result[:exception], execution_time: execution_time)
             else
-              { success: true, output: parsed_result, execution_time: nil }
+              { success: true, output: parsed_result, execution_time: execution_time }
             end
           rescue StandardError => e
             logger.error "[ConsoleSupervisor] Eval error: #{e.message}"
-            build_error_response(e, execution_time: nil)
+            execution_time = Time.now - start_time
+            build_error_response(e, execution_time: execution_time)
           end
         end
       end

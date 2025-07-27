@@ -556,7 +556,8 @@ module Consolle
       if result['success']
         # Always print result, even if empty (multiline code often returns empty string)
         puts result['result'] unless result['result'].nil?
-        puts "Execution time: #{result['execution_time']}s" if options[:verbose] && result['execution_time']
+        # Always show execution time when available
+        puts "Execution time: #{result['execution_time'].round(3)}s" if result['execution_time']
       else
         # Display error information
         if result['error_code']
@@ -572,6 +573,10 @@ module Consolle
         
         puts result['message']
         puts result['backtrace']&.join("\n") if options[:verbose] && result['backtrace']
+        
+        # Show execution time for errors too
+        puts "Execution time: #{result['execution_time'].round(3)}s" if result['execution_time']
+        
         exit 1
       end
     end
