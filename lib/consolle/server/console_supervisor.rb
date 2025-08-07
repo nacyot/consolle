@@ -212,6 +212,16 @@ module Consolle
               end
             end
 
+            # Check if output is too large and truncate if necessary
+            max_output_size = 100_000  # 100KB limit for output
+            truncated = false
+            
+            if output.bytesize > max_output_size
+              logger.warn "[ConsoleSupervisor] Output too large (#{output.bytesize} bytes), truncating to #{max_output_size} bytes"
+              output = output[0...max_output_size]
+              truncated = true
+            end
+            
             # Parse and return result
             parsed_result = parse_output(output, eval_command)
 
@@ -226,7 +236,10 @@ module Consolle
             if parsed_result.is_a?(Hash) && parsed_result[:error]
               build_error_response(parsed_result[:exception], execution_time: execution_time)
             else
-              { success: true, output: parsed_result, execution_time: execution_time }
+              result = { success: true, output: parsed_result, execution_time: execution_time }
+              result[:truncated] = true if truncated
+              result[:truncated_at] = max_output_size if truncated
+              result
             end
           rescue StandardError => e
             logger.error "[ConsoleSupervisor] Eval error: #{e.message}"

@@ -657,12 +657,27 @@ module Consolle
         
         STDERR.puts "[DEBUG] Request sent, waiting for response..." if ENV['DEBUG']
 
-        # Read response
-        response_data = socket.gets
+        # Read response - handle large responses by reading all available data
+        response_data = ''
+        begin
+          # Read until we get a newline (end of JSON response)
+          while (chunk = socket.read_nonblock(65536)) # Read in 64KB chunks
+            response_data << chunk
+            break if response_data.include?("\n")
+          end
+        rescue IO::WaitReadable
+          IO.select([socket], nil, nil, 1)
+          retry if response_data.empty? || !response_data.include?("\n")
+        rescue EOFError
+          # Server closed connection
+        end
+        
         STDERR.puts "[DEBUG] Response received: #{response_data&.bytesize} bytes" if ENV['DEBUG']
         socket.close
 
-        JSON.parse(response_data) if response_data
+        # Extract just the first line (the JSON response)
+        json_line = response_data.split("\n").first
+        JSON.parse(json_line) if json_line
       end
     rescue Timeout::Error
       STDERR.puts "[DEBUG] Timeout occurred after #{timeout} seconds" if ENV['DEBUG']
