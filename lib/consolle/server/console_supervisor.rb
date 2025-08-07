@@ -47,7 +47,10 @@ module Consolle
         start_watchdog
       end
 
-      def eval(code, timeout: 30)
+      def eval(code, timeout: nil)
+        # Allow timeout to be configured via environment variable
+        default_timeout = ENV['CONSOLLE_TIMEOUT'] ? ENV['CONSOLLE_TIMEOUT'].to_i : 30
+        timeout ||= default_timeout
         @mutex.synchronize do
           raise 'Console is not running' unless running?
 

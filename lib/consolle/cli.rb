@@ -484,7 +484,7 @@ module Consolle
       #{'  '}
       The console must be started first with 'cone start'.
     LONGDESC
-    method_option :timeout, type: :numeric, desc: 'Timeout in seconds', default: 15
+    method_option :timeout, type: :numeric, desc: 'Timeout in seconds', default: 30
     method_option :file, type: :string, aliases: '-f', desc: 'Read Ruby code from FILE'
     method_option :raw, type: :boolean, desc: 'Do not apply escape fixes for Claude Code (keep \\! as is)'
     def exec(*code_parts)
@@ -621,7 +621,7 @@ module Consolle
       File.join(Dir.pwd, 'tmp', 'cone', "#{target}.log")
     end
 
-    def send_code_to_socket(socket_path, code, timeout: 15)
+    def send_code_to_socket(socket_path, code, timeout: 30)
       request_id = SecureRandom.uuid
       # Ensure code is UTF-8 encoded
       code = code.force_encoding('UTF-8') if code.respond_to?(:force_encoding)
