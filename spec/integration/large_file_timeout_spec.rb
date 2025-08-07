@@ -14,6 +14,7 @@ RSpec.describe 'Large file timeout handling integration test' do
     # Create a large test file (>1000 bytes)
     File.write(large_test_file, <<~RUBY)
       # This is a test file larger than 1000 bytes
+      # Adding more content to ensure it exceeds 1000 bytes
       puts "=" * 70
       puts "Testing large file execution"
       puts "=" * 70
@@ -32,9 +33,17 @@ RSpec.describe 'Large file timeout handling integration test' do
       puts "Fibonacci of 10: \#{fibonacci(10)}"
       
       # Add more content to exceed 1000 bytes
+      # This section adds bulk content to ensure the file is large enough
       100.times do |i|
-        puts "Line \#{i}: This is test content to make the file larger"
+        puts "Line \#{i}: This is test content to make the file larger. Adding more text here to increase file size."
       end
+      
+      # Add even more content to guarantee > 1000 bytes
+      puts "Additional content line 1 - Lorem ipsum dolor sit amet, consectetur adipiscing elit"
+      puts "Additional content line 2 - Sed do eiusmod tempor incididunt ut labore et dolore magna"
+      puts "Additional content line 3 - Ut enim ad minim veniam, quis nostrud exercitation ullamco"
+      puts "Additional content line 4 - Duis aute irure dolor in reprehenderit in voluptate velit"
+      puts "Additional content line 5 - Excepteur sint occaecat cupidatat non proident sunt in culpa"
       
       puts "Test completed successfully!"
       "Success"
