@@ -98,14 +98,59 @@ module Consolle
                           code.encode('UTF-8')
                         end
                       end
-          encoded_code = Base64.strict_encode64(utf8_code)
-
-          # Use eval to execute the Base64-decoded code with exception handling
-          # Ensure decoded string is properly handled as UTF-8
-          eval_command = "begin; eval(Base64.decode64('#{encoded_code}').force_encoding('UTF-8'), IRB.CurrentContext.workspace.binding); rescue Exception => e; puts \"\#{e.class}: \#{e.message}\"; nil; end"
-          logger.debug '[ConsoleSupervisor] Sending eval command (Base64 encoded)'
-          @writer.puts eval_command
-          @writer.flush
+          # For large code, use temporary file approach
+          if utf8_code.bytesize > 1000
+            logger.debug "[ConsoleSupervisor] Large code (#{utf8_code.bytesize} bytes), using temporary file approach"
+            
+            # Create temp file with unique name
+            require 'tempfile'
+            require 'securerandom'
+            
+            temp_filename = "consolle_temp_#{SecureRandom.hex(8)}.rb"
+            temp_path = if defined?(Rails) && Rails.root
+                         Rails.root.join('tmp', temp_filename).to_s
+                       else
+                         File.join(Dir.tmpdir, temp_filename)
+                       end
+            
+            # Write code to temp file
+            File.write(temp_path, utf8_code)
+            logger.debug "[ConsoleSupervisor] Wrote code to temp file: #{temp_path}"
+            
+            # Load and execute the file with timeout
+            eval_command = <<~RUBY.strip
+              begin
+                require 'timeout'
+                _temp_file = '#{temp_path}'
+                Timeout.timeout(#{timeout - 1}) do
+                  load _temp_file
+                end
+              rescue Timeout::Error => e
+                puts "Timeout::Error: Code execution timed out after #{timeout - 1} seconds"
+                nil
+              rescue Exception => e
+                puts "\#{e.class}: \#{e.message}"
+                puts e.backtrace.first(5).join("\\n") if e.backtrace
+                nil
+              ensure
+                File.unlink(_temp_file) if File.exist?(_temp_file)
+              end
+            RUBY
+            
+            @writer.puts eval_command
+            @writer.flush
+          else
+            # For smaller code, use Base64 encoding to avoid escaping issues
+            encoded_code = Base64.strict_encode64(utf8_code)
+            eval_command = "begin; require 'timeout'; Timeout.timeout(#{timeout - 1}) { eval(Base64.decode64('#{encoded_code}').force_encoding('UTF-8'), IRB.CurrentContext.workspace.binding) }; rescue Timeout::Error => e; puts \"Timeout::Error: Code execution timed out after #{timeout - 1} seconds\"; nil; rescue Exception => e; puts \"\#{e.class}: \#{e.message}\"; nil; end"
+            logger.debug "[ConsoleSupervisor] Small code (#{encoded_code.bytesize} bytes), using direct Base64 approach"
+            @writer.puts eval_command
+            @writer.flush
+          end
+          
+          logger.debug "[ConsoleSupervisor] Code preview (first 100 chars): #{utf8_code[0..100].inspect}" if ENV['DEBUG']
+          
+          logger.debug "[ConsoleSupervisor] Command sent at #{Time.now}, waiting for response..."
 
           # Collect output
           output = +''
@@ -266,8 +311,10 @@ module Consolle
           # Disable pry-rails (force IRB instead of Pry)
           'DISABLE_PRY_RAILS' => '1',
 
-          # Completely disable pager
+          # Completely disable pager (critical for automation)
           'PAGER' => 'cat',           # Set pager to cat (immediate output)
+          'GEM_PAGER' => 'cat',       # Disable gem pager
+          'IRB_PAGER' => 'cat',       # Ruby 3.3+ specific pager setting
           'NO_PAGER' => '1',          # Pager disable flag
           'LESS' => '',               # Clear less pager options
 
@@ -493,6 +540,9 @@ module Consolle
 
         # Send IRB configuration commands to disable interactive features
         irb_commands = [
+          # CRITICAL: Disable pager first to prevent hanging on large outputs
+          'IRB.conf[:USE_PAGER] = false',          # Disable pager completely
+          
           # Configure custom prompt mode to eliminate continuation prompts
           'IRB.conf[:PROMPT][:CONSOLLE] = { ' \
             'AUTO_INDENT: false, ' \
@@ -503,8 +553,7 @@ module Consolle
             'RETURN: "=> %s\\n" }',
           'IRB.conf[:PROMPT_MODE] = :CONSOLLE',
 
-          # Disable interactive features
-          'IRB.conf[:USE_PAGER] = false',          # Disable pager
+          # Disable other interactive features
           'IRB.conf[:USE_COLORIZE] = false',       # Disable color output
           'IRB.conf[:USE_AUTOCOMPLETE] = false',   # Disable autocompletion
           'IRB.conf[:USE_MULTILINE] = false',      # Disable multiline editor to process code at once

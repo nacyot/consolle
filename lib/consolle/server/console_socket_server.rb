@@ -157,7 +157,10 @@ module Consolle
 
           # Send response
           begin
-            client.write(JSON.generate(response))
+            # Ensure response is properly encoded as UTF-8
+            response_json = JSON.generate(response)
+            response_json = response_json.force_encoding('UTF-8')
+            client.write(response_json)
             client.write("\n")
             client.flush
           rescue Errno::EPIPE
@@ -171,7 +174,8 @@ module Consolle
               'error' => 'InvalidRequest',
               'message' => "Invalid JSON: #{e.message}"
             }
-            client.write(JSON.generate(error_response))
+            response_json = JSON.generate(error_response).force_encoding('UTF-8')
+            client.write(response_json)
             client.write("\n")
           rescue Errno::EPIPE
             logger.debug '[ConsoleSocketServer] Client disconnected while sending JSON parse error'
