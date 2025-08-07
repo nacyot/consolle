@@ -146,11 +146,14 @@ module Consolle
       def handle_client(client)
         Thread.new do
           # Read request
+          logger.debug "[ConsoleSocketServer] Waiting for request data..." if ENV['DEBUG']
           request_data = client.gets
+          logger.debug "[ConsoleSocketServer] Received data: #{request_data&.bytesize} bytes" if ENV['DEBUG']
           return unless request_data
 
           request = JSON.parse(request_data)
           logger.debug "[ConsoleSocketServer] Request: #{request.inspect}"
+          logger.debug "[ConsoleSocketServer] Code size: #{request['code']&.bytesize} bytes" if ENV['DEBUG'] && request['code']
 
           # Process through broker
           response = @broker.process_request(request)

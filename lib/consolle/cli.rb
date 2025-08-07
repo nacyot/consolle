@@ -623,6 +623,9 @@ module Consolle
 
     def send_code_to_socket(socket_path, code, timeout: 15)
       request_id = SecureRandom.uuid
+      # Ensure code is UTF-8 encoded
+      code = code.force_encoding('UTF-8') if code.respond_to?(:force_encoding)
+      
       request = {
         'action' => 'eval',
         'code' => code,
@@ -630,23 +633,42 @@ module Consolle
         'request_id' => request_id
       }
 
+      STDERR.puts "[DEBUG] Creating socket connection to: #{socket_path}" if ENV['DEBUG']
+      
       Timeout.timeout(timeout + 5) do
         socket = UNIXSocket.new(socket_path)
+        STDERR.puts "[DEBUG] Socket connected" if ENV['DEBUG']
 
-        # Send request as single line JSON
-        socket.write(JSON.generate(request))
+        # Send request as single line JSON with UTF-8 encoding
+        json_data = JSON.generate(request)
+        STDERR.puts "[DEBUG] JSON data size: #{json_data.bytesize} bytes" if ENV['DEBUG']
+        
+        # Debug: Check for newlines in JSON
+        if ENV['DEBUG'] && json_data.include?("\n")
+          STDERR.puts "[DEBUG] WARNING: JSON contains literal newline!"
+          File.write("/tmp/cone_debug.json", json_data) if ENV['DEBUG_SAVE']
+        end
+        
+        STDERR.puts "[DEBUG] Sending request..." if ENV['DEBUG']
+        
+        socket.write(json_data)
         socket.write("\n")
         socket.flush
+        
+        STDERR.puts "[DEBUG] Request sent, waiting for response..." if ENV['DEBUG']
 
         # Read response
         response_data = socket.gets
+        STDERR.puts "[DEBUG] Response received: #{response_data&.bytesize} bytes" if ENV['DEBUG']
         socket.close
 
-        JSON.parse(response_data)
+        JSON.parse(response_data) if response_data
       end
     rescue Timeout::Error
+      STDERR.puts "[DEBUG] Timeout occurred after #{timeout} seconds" if ENV['DEBUG']
       { 'success' => false, 'error' => 'Timeout', 'message' => "Request timed out after #{timeout} seconds" }
     rescue StandardError => e
+      STDERR.puts "[DEBUG] Error: #{e.class}: #{e.message}" if ENV['DEBUG']
       { 'success' => false, 'error' => e.class.name, 'message' => e.message }
     end
 

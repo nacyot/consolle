@@ -159,6 +159,8 @@ module Consolle
           begin
             loop do
               if Time.now > deadline
+                logger.debug "[ConsoleSupervisor] Timeout reached after #{Time.now - start_time}s, output so far: #{output.bytesize} bytes"
+                logger.debug "[ConsoleSupervisor] Output content: #{output.inspect}" if ENV['DEBUG']
                 # Timeout - send Ctrl-C
                 @writer.write(CTRL_C)
                 @writer.flush
@@ -171,6 +173,7 @@ module Consolle
               begin
                 chunk = @reader.read_nonblock(4096)
                 output << chunk
+                logger.debug "[ConsoleSupervisor] Got #{chunk.bytesize} bytes, total output: #{output.bytesize} bytes" if ENV['DEBUG']
 
                 # Respond to cursor position request during command execution
                 if chunk.include?("\e[6n")
@@ -192,6 +195,7 @@ module Consolle
                   break
                 end
               rescue IO::WaitReadable
+                logger.debug "[ConsoleSupervisor] Waiting for data... (#{Time.now - start_time}s elapsed, output size: #{output.bytesize})" if ENV['DEBUG']
                 IO.select([@reader], nil, nil, 0.1)
               rescue Errno::EIO
                 # PTY can throw EIO when no data available

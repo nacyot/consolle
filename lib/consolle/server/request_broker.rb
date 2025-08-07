@@ -42,6 +42,7 @@ module Consolle
 
       def process_request(request)
         request_id = request['request_id'] || SecureRandom.uuid
+        logger.debug "[RequestBroker] Received request: #{request_id}, action: #{request['action']}" if ENV['DEBUG']
 
         # Create future for response
         future = RequestFuture.new
@@ -57,11 +58,16 @@ module Consolle
                       request: request,
                       timestamp: Time.now
                     })
+        logger.debug "[RequestBroker] Queued request: #{request_id}, queue size: #{@queue.size}" if ENV['DEBUG']
 
         # Wait for response (with timeout)
         begin
-          future.get(timeout: request['timeout'] || 30)
+          logger.debug "[RequestBroker] Waiting for response: #{request_id}, timeout: #{request['timeout'] || 30}" if ENV['DEBUG']
+          response = future.get(timeout: request['timeout'] || 30)
+          logger.debug "[RequestBroker] Got response: #{request_id}" if ENV['DEBUG']
+          response
         rescue Timeout::Error
+          logger.debug "[RequestBroker] Request timed out: #{request_id}" if ENV['DEBUG']
           {
             'success' => false,
             'error' => 'RequestTimeout',
