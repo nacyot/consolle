@@ -194,7 +194,8 @@ module Consolle
               'error' => e.class.name,
               'message' => e.message
             }
-            client.write(JSON.generate(error_response))
+            response_json = JSON.generate(error_response).force_encoding('UTF-8')
+            client.write(response_json)
             client.write("\n")
           rescue Errno::EPIPE
             # Client disconnected while sending error response
