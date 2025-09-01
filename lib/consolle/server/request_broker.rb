@@ -62,8 +62,10 @@ module Consolle
 
         # Wait for response (with timeout)
         begin
-          logger.debug "[RequestBroker] Waiting for response: #{request_id}, timeout: #{request['timeout'] || 30}" if ENV['DEBUG']
-          response = future.get(timeout: request['timeout'] || 30)
+          env_timeout = ENV['CONSOLLE_TIMEOUT']&.to_i
+          future_timeout = (env_timeout && env_timeout > 0) ? env_timeout : (request['timeout'] || 30)
+          logger.debug "[RequestBroker] Waiting for response: #{request_id}, timeout: #{future_timeout}" if ENV['DEBUG']
+          response = future.get(timeout: future_timeout)
           logger.debug "[RequestBroker] Got response: #{request_id}" if ENV['DEBUG']
           response
         rescue Timeout::Error
@@ -157,7 +159,8 @@ module Consolle
 
       def process_eval_request(request)
         code = request['code']
-        timeout = request['timeout'] || 30
+        env_timeout = ENV['CONSOLLE_TIMEOUT']&.to_i
+        timeout = (env_timeout && env_timeout > 0) ? env_timeout : (request['timeout'] || 30)
 
         unless code
           return {
@@ -168,7 +171,11 @@ module Consolle
         end
 
         # Execute through supervisor
-        result = @supervisor.eval(code, timeout: timeout)
+        if request.key?('pre_sigint')
+          result = @supervisor.eval(code, timeout: timeout, pre_sigint: request['pre_sigint'])
+        else
+          result = @supervisor.eval(code, timeout: timeout)
+        end
 
         # Format response
         if result[:success]

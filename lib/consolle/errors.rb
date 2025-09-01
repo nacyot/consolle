@@ -32,6 +32,13 @@ module Consolle
     # Execution errors
     class ExecutionError < Error; end
 
+    # Server/console health issues
+    class ServerUnhealthy < Error
+      def initialize(message = 'Console server is unhealthy')
+        super(message)
+      end
+    end
+
     # Syntax error in executed code
     class SyntaxError < ExecutionError
       def initialize(message)
@@ -72,7 +79,8 @@ module Consolle
         'RuntimeError' => 'RUNTIME_ERROR',
         '::RuntimeError' => 'RUNTIME_ERROR',
         'StandardError' => 'STANDARD_ERROR',
-        'Exception' => 'EXCEPTION'
+        'Exception' => 'EXCEPTION',
+        'Consolle::Errors::ServerUnhealthy' => 'SERVER_UNHEALTHY'
       }.freeze
 
       def self.to_code(exception)

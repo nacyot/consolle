@@ -47,10 +47,14 @@ module Consolle
         start_watchdog
       end
 
-      def eval(code, timeout: nil)
-        # Allow timeout to be configured via environment variable
-        default_timeout = ENV['CONSOLLE_TIMEOUT'] ? ENV['CONSOLLE_TIMEOUT'].to_i : 30
-        timeout ||= default_timeout
+      def eval(code, timeout: nil, pre_sigint: nil)
+        # CONSOLLE_TIMEOUT has highest priority if present and > 0
+        env_timeout = ENV['CONSOLLE_TIMEOUT']&.to_i
+        timeout = if env_timeout && env_timeout > 0
+                    env_timeout
+                  else
+                    timeout || 60
+                  end
         @mutex.synchronize do
           raise 'Console is not running' unless running?
 
@@ -60,22 +64,40 @@ module Consolle
           # Check if this is a remote console
           is_remote = @command.include?('ssh') || @command.include?('kamal') || @command.include?('docker')
 
-          if is_remote
-            # Send Ctrl-C to ensure clean state before execution
+          # Decide whether to send pre-exec Ctrl-C
+          # Default: enabled for all consoles to avoid getting stuck mid-input.
+          # Opt-out via param or ENV `CONSOLLE_DISABLE_PRE_SIGINT=1`.
+          disable_pre_sigint = ENV['CONSOLLE_DISABLE_PRE_SIGINT'] == '1'
+          default_pre_sigint = (@rails_env != 'test')
+          do_pre_sigint = if pre_sigint.nil?
+                            default_pre_sigint && !disable_pre_sigint
+                          else
+                            pre_sigint
+                          end
+
+          if do_pre_sigint
+            # Send Ctrl-C to ensure clean state before execution, then wait up to 3s for prompt.
+            # If prompt doesn't come back, consider server unhealthy, force-restart the subprocess,
+            # and return an error so the caller can retry after recovery.
             @writer.write(CTRL_C)
             @writer.flush
-
-            # Clear any pending output
-            clear_buffer
-
-            # Wait for prompt after Ctrl-C
+            # Nudge IRB and force prompt emission with a trivial probe
+            @writer.puts "puts '__consolle_probe__'"
+            @writer.flush
             begin
-              wait_for_prompt(timeout: 1, consume_all: true)
+              wait_for_prompt(timeout: 3, consume_all: true)
             rescue Timeout::Error
-              # Continue anyway, some consoles may not show prompt immediately
+              logger.error '[ConsoleSupervisor] No prompt after pre-exec Ctrl-C (3s). Forcing console restart.'
+              # Forcefully stop subprocess so watchdog can restart
+              @process_mutex.synchronize do
+                stop_console
+              end
+              # Return an unhealthy error to the caller
+              err = Consolle::Errors::ServerUnhealthy.new('No prompt after pre-exec interrupt (3s); console restarted')
+              return build_error_response(err, execution_time: 0)
             end
           else
-            # For local consoles, just clear buffer
+            # For local consoles without pre-sigint, clear buffer only
             clear_buffer
           end
 

@@ -78,7 +78,7 @@ module Consolle
         nil
       end
 
-      def send_code(code, timeout: 30)
+      def send_code(code, timeout: 60)
         raise 'Console is not running' unless running?
 
         request = {
