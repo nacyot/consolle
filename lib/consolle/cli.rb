@@ -584,6 +584,10 @@ module Consolle
 
     private
 
+    def current_rails_env
+      ENV['RAILS_ENV'] || 'development'
+    end
+
     def ensure_rails_project!
       return if File.exist?('config/environment.rb') || File.exist?('config/application.rb')
 
