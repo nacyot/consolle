@@ -205,7 +205,7 @@ RSpec.describe 'Comprehensive multi-session tests' do
 
       # Start default session
       cli = Consolle::CLI.new
-      cli.options = { target: 'cone', rails_env: 'development', verbose: false }
+      cli.options = { target: 'cone', verbose: false }
       allow(cli).to receive(:create_rails_adapter).with('development', 'cone', nil, nil).and_return(adapter_cone)
       allow(cli).to receive(:load_session_info).and_return(nil)
       allow(cli).to receive(:log_session_event)
@@ -214,7 +214,7 @@ RSpec.describe 'Comprehensive multi-session tests' do
 
       # Start dev session
       cli2 = Consolle::CLI.new
-      cli2.options = { target: 'dev', rails_env: 'development', verbose: false }
+      cli2.options = { target: 'dev', verbose: false }
       allow(cli2).to receive(:create_rails_adapter).with('development', 'dev', nil, nil).and_return(adapter_dev)
       allow(cli2).to receive(:load_session_info).and_return(nil)
       allow(cli2).to receive(:log_session_event)

@@ -24,7 +24,7 @@ Cone은 디버깅, 데이터 탐색, 그리고 개발 보조 도구로 사용됩
 
 ```bash
 $ cone start # 서버 시작
-$ cone start -e test # test 환경에서 console 시작
+$ RAILS_ENV=test cone start # test 환경에서 console 시작
 ```
 
 중지와 재시작 명령어도 제공합니다.

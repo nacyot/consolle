@@ -149,6 +149,27 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
       expect(result[:execution_time]).to eq(0.1)
     end
 
+    it 'returns SERVER_UNHEALTHY when pre-exec prompt does not return within 3s' do
+      # Force pre_sigint path (even in test env)
+      # Make wait_for_prompt fail during the pre-exec check
+      allow(supervisor).to receive(:wait_for_prompt).and_raise(Timeout::Error)
+
+      writer = supervisor.instance_variable_get(:@writer)
+      expect(writer).to receive(:write).with("\x03").at_least(:once)
+      expect(writer).to receive(:puts).with("puts '__consolle_probe__'")
+      expect(writer).to receive(:flush).at_least(:once)
+
+      # Stub stop_console so we don't actually touch processes
+      allow(supervisor).to receive(:stop_console)
+
+      result = supervisor.eval('1 + 1', timeout: 10, pre_sigint: true)
+
+      expect(result[:success]).to be false
+      expect(result[:error_class]).to eq('Consolle::Errors::ServerUnhealthy')
+      expect(result[:error_code]).to eq('SERVER_UNHEALTHY')
+      expect(result[:output]).to include('No prompt after pre-exec interrupt')
+    end
+
     it 'handles Korean (UTF-8) strings correctly' do
       # Create a proper exception for IO::WaitReadable
       wait_readable_error = Class.new(StandardError) { include IO::WaitReadable }.new

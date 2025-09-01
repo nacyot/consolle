@@ -24,7 +24,7 @@ You can start cone with the `start` command and specify the execution environmen
 
 ```bash
 $ cone start # Start server
-$ cone start -e test # Start console in test environment
+$ RAILS_ENV=test cone start # Start console in test environment
 ```
 
 It also provides stop and restart commands.

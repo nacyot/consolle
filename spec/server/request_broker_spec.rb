@@ -96,6 +96,42 @@ RSpec.describe Consolle::Server::RequestBroker do
         expect(response['error']).to eq('MissingParameter')
         expect(response['message']).to include('Missing required parameter: code')
       end
+
+      context 'with CONSOLLE_TIMEOUT env' do
+        around do |ex|
+          orig = ENV['CONSOLLE_TIMEOUT']
+          ENV['CONSOLLE_TIMEOUT'] = '2'
+          ex.run
+        ensure
+          ENV['CONSOLLE_TIMEOUT'] = orig
+        end
+
+        it 'overrides provided timeout and passes to supervisor' do
+          expect(supervisor).to receive(:eval).with('1 + 1', timeout: 2).and_return({
+                                                                                      success: true,
+                                                                                      output: '2',
+                                                                                      execution_time: 0.05
+                                                                                    })
+
+          request = { 'action' => 'eval', 'code' => '1 + 1', 'timeout' => 99, 'request_id' => 'env-1' }
+          response = broker.process_request(request)
+          expect(response['success']).to be true
+          expect(response['result']).to eq('2')
+        end
+
+        it 'causes broker wait to time out when work exceeds env timeout' do
+          # Simulate slow execution
+          allow(supervisor).to receive(:eval) do
+            sleep 3
+            { success: true, output: 'ok', execution_time: 3 }
+          end
+
+          request = { 'action' => 'eval', 'code' => 'sleepy', 'timeout' => 99, 'request_id' => 'env-2' }
+          response = broker.process_request(request)
+          expect(response['success']).to be false
+          expect(response['error']).to eq('RequestTimeout')
+        end
+      end
     end
 
     context 'restart action' do

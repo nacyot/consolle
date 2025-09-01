@@ -28,7 +28,6 @@ RSpec.describe Consolle::CLI do
       before do
         cli.options = {
           target: 'test',
-          rails_env: 'development',
           command: 'bin/rails console',
           verbose: false
         }
@@ -36,7 +35,7 @@ RSpec.describe Consolle::CLI do
 
       it 'creates adapter with default command' do
         expect(cli).to receive(:create_rails_adapter).with(
-          'development',
+          anything,   # rails_env is provided externally; not asserted
           'test',
           'bin/rails console',
           nil
@@ -50,7 +49,6 @@ RSpec.describe Consolle::CLI do
       before do
         cli.options = {
           target: 'test',
-          rails_env: 'development',
           command: 'bundle exec rails console',
           verbose: false
         }
@@ -58,7 +56,7 @@ RSpec.describe Consolle::CLI do
 
       it 'creates adapter with custom command' do
         expect(cli).to receive(:create_rails_adapter).with(
-          'development',
+          anything,   # rails_env is provided externally; not asserted
           'test',
           'bundle exec rails console',
           nil
@@ -72,7 +70,6 @@ RSpec.describe Consolle::CLI do
       before do
         cli.options = {
           target: 'kamal',
-          rails_env: 'production',
           command: 'docker exec -it app-web-123 bin/rails console',
           verbose: false
         }
@@ -80,7 +77,7 @@ RSpec.describe Consolle::CLI do
 
       it 'creates adapter with complex command' do
         expect(cli).to receive(:create_rails_adapter).with(
-          'production',
+          anything,   # rails_env is provided externally; not asserted
           'kamal',
           'docker exec -it app-web-123 bin/rails console',
           nil

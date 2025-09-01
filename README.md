@@ -8,7 +8,7 @@ Consolle is a library that manages Rails console through PTY (Pseudo-Terminal). 
 - **Socket Server Architecture**: Stable client-server communication through Unix socket
 - **Automatic Restart (Watchdog)**: Automatic recovery on process failure
 - **Environment-specific Execution**: Supports Rails environments (development, test, production)
-- **Timeout Handling**: Automatic termination of infinite loops and long-running code
+- **Timeout Handling**: Automatic termination of long-running code with robust prompt recovery
 - **Log Management**: Automatic management of execution history and session logs
 
 ## Installation
@@ -50,17 +50,46 @@ cone restart
 ### Advanced Usage
 
 ```bash
-# Start with specific environment
-cone start -e test
+# Start with specific environment (use RAILS_ENV)
+RAILS_ENV=test cone start
 
-# Restart with environment change
-cone restart -e production
+# Restart with environment change (use RAILS_ENV)
+RAILS_ENV=production cone restart
 
 # Force full server restart
 cone restart --force
 
-# Set timeout
-cone exec "sleep 10" --timeout 5
+# Set timeout (default: 60s; precedence: CONSOLLE_TIMEOUT > --timeout > defaults)
+CONSOLLE_TIMEOUT=90 cone exec "long_running_task"   # env wins
+cone exec "long_running_task" --timeout 120         # falls back when env not set
+
+# Pre-exec Ctrl-C (prompt separation)
+By default (development/production), cone sends Ctrl-C before each `exec` and waits for the IRB prompt (up to 3 seconds) to ensure a clean state and avoid hanging on partial input. If the prompt does not return within 3 seconds, the console subprocess is force-restarted and the request fails with `SERVER_UNHEALTHY`, so the caller can retry.
+
+Timeout precedence
+- `CONSOLLE_TIMEOUT` (if set and > 0) overrides all other sources on both client and server.
+- Otherwise, CLI `--timeout` is used.
+- Otherwise, default of 60s applies.
+
+- Per‑call control (CLI):
+  - Enable: `cone exec --pre-sigint 'code'`
+  - Disable: `cone exec --no-pre-sigint 'code'`
+- Global (server‑wide) control via environment when starting the server:
+  - Disable: `CONSOLLE_DISABLE_PRE_SIGINT=1 cone start`
+  - Note: this env var is read by the server process at start time, not by `cone exec`.
+
+# Timeout and interrupt behavior during execution
+- On execution timeout, cone sends Ctrl‑C to interrupt and attempts prompt recovery. For local consoles, it also sends an OS‑level `SIGINT` as a fallback.
+- After recovery, subsequent `cone exec` requests continue normally.
+
+# Error codes
+- `EXECUTION_TIMEOUT`: The executed code exceeded its timeout.
+- `SERVER_UNHEALTHY`: Pre‑exec prompt did not return within 3 seconds; the console subprocess was restarted and the request failed.
+
+# Examples
+- Force an execution timeout quickly and verify recovery:
+  - `cone exec 'sleep 999' --timeout 2` → fails with `EXECUTION_TIMEOUT`
+  - `cone exec 'puts :after_timeout; :ok'` → should succeed (`:ok`)
 
 # Verbose log output
 cone -v exec "User.all"
@@ -120,7 +149,7 @@ Consolle consists of the following structure:
 - Manages Rails console process through PTY
 - Automatic restart (Watchdog) feature
 - Environment variable settings and IRB automation configuration
-- Timeout handling and Ctrl-C support
+- Timeout handling and Ctrl-C support (pre-exec safety check + post-timeout recovery)
 
 #### RequestBroker
 - Ensures request order through serial queue
@@ -144,6 +173,11 @@ env = {
   "LINES" => "24"                 # Fixed line count
 }
 ```
+
+Additional environment variables
+
+- `CONSOLLE_TIMEOUT`: Highest‑priority timeout (seconds). Overrides CLI `--timeout` and defaults on both client and server.
+- `CONSOLLE_DISABLE_PRE_SIGINT=1`: Disable the pre‑exec Ctrl‑C prompt check at the server level (read when starting the server).
 
 ## File Locations
 
