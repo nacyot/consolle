@@ -20,10 +20,10 @@ Existing objects also reference old code, so you need to create new ones to use 
 
 ## Starting and Stopping Cone Server
 
-You can start cone with the `start` command and specify the execution environment with `-e`.
+You can start cone with the `start` command. To select the Rails environment, set the `RAILS_ENV` environment variable.
 
 ```bash
-$ cone start # Start server
+$ cone start # Start server (uses RAILS_ENV or defaults to development)
 $ RAILS_ENV=test cone start # Start console in test environment
 ```
 
@@ -115,3 +115,34 @@ $ cone exec -f complex_task.rb
 ```
 
 All methods maintain the session state, so variables and objects persist between executions.
+
+## Execution Safety & Timeouts
+
+- Default timeout: 60s
+- Timeout precedence: `CONSOLLE_TIMEOUT` (if set and > 0) > CLI `--timeout` > default (60s)
+- Pre-exec Ctrl-C (prompt separation):
+  - Before each `exec`, cone sends Ctrl-C and waits up to 3 seconds for the IRB prompt to ensure a clean state.
+  - If the prompt does not return in 3 seconds, the console subprocess is restarted and the request fails with `SERVER_UNHEALTHY`.
+  - Disable globally for the server: `CONSOLLE_DISABLE_PRE_SIGINT=1 cone start`
+  - Per-call control: `--pre-sigint` / `--no-pre-sigint`
+
+### Examples
+
+```bash
+# Set timeout via CLI (fallback when CONSOLLE_TIMEOUT is not set)
+cone exec 'heavy_task' --timeout 120
+
+# Highest priority timeout (applies on client and server)
+CONSOLLE_TIMEOUT=90 cone exec 'heavy_task'
+
+# Verify recovery after a timeout
+cone exec 'sleep 999' --timeout 2      # -> fails with EXECUTION_TIMEOUT
+cone exec "puts :after_timeout; :ok"   # -> should succeed (prompt recovered)
+
+# Disable pre-exec Ctrl-C for a single call
+cone exec --no-pre-sigint 'code'
+```
+
+### Error Codes
+- `EXECUTION_TIMEOUT`: The executed code exceeded its timeout.
+- `SERVER_UNHEALTHY`: The pre-exec prompt did not return within 3 seconds; the console subprocess was restarted and the request failed.

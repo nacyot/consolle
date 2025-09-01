@@ -20,10 +20,10 @@ Cone은 디버깅, 데이터 탐색, 그리고 개발 보조 도구로 사용됩
 
 ## Cone 서버 시작과 중지
 
-`start` 명령어로 cone을 시작할 수 있으며, `-e`로 실행 환경을 지정할 수 있습니다.
+`start` 명령어로 cone을 시작할 수 있습니다. 실행 환경 지정은 `RAILS_ENV` 환경변수를 사용합니다.
 
 ```bash
-$ cone start # 서버 시작
+$ cone start # 서버 시작 (RAILS_ENV가 없으면 development)
 $ RAILS_ENV=test cone start # test 환경에서 console 시작
 ```
 
@@ -115,3 +115,34 @@ $ cone exec -f complex_task.rb
 ```
 
 모든 방법은 세션 상태를 유지하므로 변수와 객체가 실행 간에 지속됩니다.
+
+## 실행 안전장치 & 타임아웃
+
+- 기본 타임아웃: 60초
+- 타임아웃 우선순위: `CONSOLLE_TIMEOUT`(설정되고 0보다 클 때) > CLI `--timeout` > 기본값(60초)
+- 사전 Ctrl‑C(프롬프트 분리):
+  - 매 `exec` 전에 Ctrl‑C를 보내고 IRB 프롬프트를 최대 3초 대기해 깨끗한 상태를 보장합니다.
+  - 3초 내 프롬프트가 돌아오지 않으면 콘솔 하위 프로세스를 재시작하고 요청은 `SERVER_UNHEALTHY`로 실패합니다.
+  - 서버 전역 비활성화: `CONSOLLE_DISABLE_PRE_SIGINT=1 cone start`
+  - 호출 단위 제어: `--pre-sigint` / `--no-pre-sigint`
+
+### 예시
+
+```bash
+# CLI로 타임아웃 지정(환경변수 미설정 시 유효)
+cone exec 'heavy_task' --timeout 120
+
+# 최우선 타임아웃(클라이언트·서버 모두 적용)
+CONSOLLE_TIMEOUT=90 cone exec 'heavy_task'
+
+# 타임아웃 이후 복구 확인
+cone exec 'sleep 999' --timeout 2      # -> EXECUTION_TIMEOUT로 실패
+cone exec "puts :after_timeout; :ok"   # -> 정상 동작(프롬프트 복구)
+
+# 호출 단위로 사전 Ctrl‑C 비활성화
+cone exec --no-pre-sigint 'code'
+```
+
+### 에러 코드
+- `EXECUTION_TIMEOUT`: 실행한 코드가 타임아웃을 초과함
+- `SERVER_UNHEALTHY`: 사전 프롬프트 확인(3초) 실패로 콘솔 재시작, 요청 실패
