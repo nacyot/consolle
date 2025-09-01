@@ -478,7 +478,8 @@ module Consolle
       #{'  '}
       The console must be started first with 'cone start'.
     LONGDESC
-    method_option :timeout, type: :numeric, desc: 'Timeout in seconds', default: 30
+    method_option :timeout, type: :numeric, desc: 'Timeout in seconds', default: 60
+    method_option :pre_sigint, type: :boolean, desc: 'Send Ctrl-C before executing code (experimental)'
     method_option :file, type: :string, aliases: '-f', desc: 'Read Ruby code from FILE'
     method_option :raw, type: :boolean, desc: 'Do not apply escape fixes for Claude Code (keep \\! as is)'
     def exec(*code_parts)
@@ -542,7 +543,13 @@ module Consolle
       puts "Executing: #{code}" if options[:verbose]
 
       # Send code to socket
-      result = send_code_to_socket(session_info[:socket_path], code, timeout: options[:timeout])
+      send_opts = { timeout: options[:timeout] }
+      send_opts[:pre_sigint] = options[:pre_sigint] unless options[:pre_sigint].nil?
+      result = send_code_to_socket(
+        session_info[:socket_path],
+        code,
+        **send_opts
+      )
 
       # Log the request and response
       log_session_activity(session_info[:process_pid], code, result)
@@ -584,10 +591,6 @@ module Consolle
       exit 1
     end
 
-    def current_rails_env
-      ENV['RAILS_ENV'] || 'development'
-    end
-
     def ensure_project_directories
       # Create tmp/cone directory for socket
       socket_dir = File.join(Dir.pwd, 'tmp', 'cone')
@@ -619,21 +622,27 @@ module Consolle
       File.join(Dir.pwd, 'tmp', 'cone', "#{target}.log")
     end
 
-    def send_code_to_socket(socket_path, code, timeout: 30)
+    def send_code_to_socket(socket_path, code, timeout: 60, pre_sigint: nil)
       request_id = SecureRandom.uuid
       # Ensure code is UTF-8 encoded
       code = code.force_encoding('UTF-8') if code.respond_to?(:force_encoding)
       
+      # CONSOLLE_TIMEOUT takes highest priority on client side if present and > 0
+      env_timeout = ENV['CONSOLLE_TIMEOUT']&.to_i
+      effective_timeout = (env_timeout && env_timeout > 0) ? env_timeout : timeout
+
       request = {
         'action' => 'eval',
         'code' => code,
-        'timeout' => timeout,
+        'timeout' => effective_timeout,
         'request_id' => request_id
       }
+      # Include pre_sigint flag only when explicitly provided (true/false)
+      request['pre_sigint'] = pre_sigint unless pre_sigint.nil?
 
       STDERR.puts "[DEBUG] Creating socket connection to: #{socket_path}" if ENV['DEBUG']
       
-      Timeout.timeout(timeout + 5) do
+      Timeout.timeout(effective_timeout + 5) do
         socket = UNIXSocket.new(socket_path)
         STDERR.puts "[DEBUG] Socket connected" if ENV['DEBUG']
 
@@ -678,8 +687,8 @@ module Consolle
         JSON.parse(json_line) if json_line
       end
     rescue Timeout::Error
-      STDERR.puts "[DEBUG] Timeout occurred after #{timeout} seconds" if ENV['DEBUG']
-      { 'success' => false, 'error' => 'Timeout', 'message' => "Request timed out after #{timeout} seconds" }
+      STDERR.puts "[DEBUG] Timeout occurred after #{effective_timeout} seconds" if ENV['DEBUG']
+      { 'success' => false, 'error' => 'Timeout', 'message' => "Request timed out after #{effective_timeout} seconds" }
     rescue StandardError => e
       STDERR.puts "[DEBUG] Error: #{e.class}: #{e.message}" if ENV['DEBUG']
       { 'success' => false, 'error' => e.class.name, 'message' => e.message }

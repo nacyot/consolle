@@ -186,10 +186,28 @@ module Consolle
               if Time.now > deadline
                 logger.debug "[ConsoleSupervisor] Timeout reached after #{Time.now - start_time}s, output so far: #{output.bytesize} bytes"
                 logger.debug "[ConsoleSupervisor] Output content: #{output.inspect}" if ENV['DEBUG']
-                # Timeout - send Ctrl-C
-                @writer.write(CTRL_C)
-                @writer.flush
-                sleep 0.5
+                # Timeout - try to interrupt current execution and recover prompt
+                3.times do |i|
+                  @writer.write(CTRL_C)
+                  @writer.flush
+                  logger.debug "[ConsoleSupervisor] Sent Ctrl-C (attempt #{i + 1})"
+                  begin
+                    wait_for_prompt(timeout: 1.0, consume_all: true)
+                    logger.debug '[ConsoleSupervisor] Prompt recovered after Ctrl-C'
+                    break
+                  rescue Timeout::Error
+                    # As a fallback for local consoles, send OS-level SIGINT to the subprocess
+                    unless is_remote
+                      begin
+                        Process.kill('INT', @pid)
+                        logger.warn '[ConsoleSupervisor] Sent OS-level SIGINT to subprocess'
+                      rescue StandardError => e
+                        logger.warn "[ConsoleSupervisor] Failed to send OS-level SIGINT: #{e.message}"
+                      end
+                    end
+                  end
+                end
+                # Final cleanup
                 clear_buffer
                 execution_time = Time.now - start_time
                 return build_timeout_response(timeout)
