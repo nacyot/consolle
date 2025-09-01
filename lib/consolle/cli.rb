@@ -50,7 +50,7 @@ module Consolle
           shell.say
           shell.say 'EXAMPLES:', :yellow
           shell.say "  cone exec 'User.count'                    # Execute code in default session"
-          shell.say "  cone start -t api -e production           # Start production console named 'api'"
+          shell.say "  RAILS_ENV=production cone start           # Start console in production"
           shell.say "  cone exec -t api 'Rails.env'              # Execute code in 'api' session"
           shell.say '  cone exec -f script.rb                    # Execute code from file'
           shell.say
@@ -121,8 +121,8 @@ module Consolle
       The console runs as a daemon and can be accessed through the exec command.
 
       You can specify a custom session name with --target to run multiple consoles:
-        cone start --target api --rails_env production
-        cone start --target worker --rails_env development
+        RAILS_ENV=production cone start --target api
+        RAILS_ENV=development cone start --target worker
 
       Custom console commands are supported for special environments:
         cone start --command "kamal app exec -i 'bin/rails console'"
@@ -131,7 +131,7 @@ module Consolle
       For SSH-based commands that require authentication (e.g., 1Password SSH agent):
         cone start --command "kamal console" --wait-timeout 60
     LONGDESC
-    method_option :rails_env, type: :string, aliases: '-e', desc: 'Rails environment', default: 'development'
+    # Rails environment is now controlled via RAILS_ENV, not a CLI option
     method_option :command, type: :string, aliases: '-c', desc: 'Custom console command', default: 'bin/rails console'
     method_option :wait_timeout, type: :numeric, aliases: '-w', desc: 'Timeout for console startup (seconds)', default: Consolle::DEFAULT_WAIT_TIMEOUT
     def start
@@ -160,7 +160,7 @@ module Consolle
         clear_session_info
       end
 
-      adapter = create_rails_adapter(options[:rails_env], options[:target], options[:command], options[:wait_timeout])
+      adapter = create_rails_adapter(current_rails_env, options[:target], options[:command], options[:wait_timeout])
 
       puts 'Starting Rails console...'
 
@@ -175,7 +175,7 @@ module Consolle
 
         # Log session start
         log_session_event(adapter.process_pid, 'session_start', {
-                            rails_env: options[:rails_env],
+                            rails_env: current_rails_env,
                             socket_path: adapter.socket_path
                           })
       rescue StandardError => e
@@ -197,7 +197,7 @@ module Consolle
       end
 
       # Check if server is actually responsive
-      adapter = create_rails_adapter('development', options[:target])
+      adapter = create_rails_adapter(current_rails_env, options[:target])
       server_status = begin
         adapter.get_status
       rescue StandardError
@@ -255,7 +255,7 @@ module Consolle
         # Check if process is alive
         if info['process_pid'] && process_alive?(info['process_pid'])
           # Try to get server status
-          adapter = create_rails_adapter('development', name)
+      adapter = create_rails_adapter(current_rails_env, name)
           server_status = begin
             adapter.get_status
           rescue StandardError
@@ -390,13 +390,12 @@ module Consolle
         cone restart -t api
         cone restart --target worker --force
     LONGDESC
-    method_option :rails_env, type: :string, aliases: '-e', desc: 'Rails environment', default: 'development'
     method_option :force, type: :boolean, aliases: '-f', desc: 'Force restart the entire server'
     def restart
       ensure_rails_project!
       validate_session_name!(options[:target])
 
-      adapter = create_rails_adapter(options[:rails_env], options[:target])
+      adapter = create_rails_adapter(current_rails_env, options[:target])
 
       if adapter.running?
         # Check if environment needs to be changed
@@ -406,25 +405,20 @@ module Consolle
           nil
         end
         current_env = current_status&.dig('rails_env') || 'development'
-        needs_full_restart = options[:force] || (current_env != options[:rails_env])
+        desired_env = current_rails_env
+        needs_full_restart = options[:force] || (current_env != desired_env)
 
         if needs_full_restart
-          if current_env != options[:rails_env]
-            puts "Environment change detected (#{current_env} -> #{options[:rails_env]})"
+          if current_env != desired_env
+            puts "Environment change detected (#{current_env} -> #{desired_env})"
             puts 'Performing full server restart...'
           else
             puts 'Force restarting Rails console server...'
           end
 
-          # Save current rails_env for start command
-          old_env = @rails_env
-          @rails_env = options[:rails_env]
-
           stop
           sleep 1
-          invoke(:start, [], { rails_env: options[:rails_env] })
-
-          @rails_env = old_env
+          invoke(:start)
         else
           puts 'Restarting Rails console subprocess...'
 
@@ -459,7 +453,7 @@ module Consolle
         end
       else
         puts 'Rails console is not running. Starting it...'
-        invoke(:start, [], { rails_env: options[:rails_env] })
+        invoke(:start)
       end
     end
 
@@ -588,6 +582,10 @@ module Consolle
 
       puts 'Error: This command must be run from a Rails project root directory'
       exit 1
+    end
+
+    def current_rails_env
+      ENV['RAILS_ENV'] || 'development'
     end
 
     def ensure_project_directories
