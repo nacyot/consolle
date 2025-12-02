@@ -418,7 +418,7 @@ module Consolle
 
           stop
           sleep 1
-          invoke(:start)
+          invoke(:start, [], {})
         else
           puts 'Restarting Rails console subprocess...'
 
