@@ -13,7 +13,7 @@ module Consolle
       attr_reader :socket_path, :process_pid, :pid_path, :log_path
 
       def initialize(socket_path: nil, pid_path: nil, log_path: nil, rails_root: nil, rails_env: nil, verbose: false,
-                     command: nil, wait_timeout: nil)
+                     command: nil, wait_timeout: nil, mode: nil)
         @socket_path = socket_path || default_socket_path
         @pid_path = pid_path || default_pid_path
         @log_path = log_path || default_log_path
@@ -22,6 +22,7 @@ module Consolle
         @verbose = verbose
         @command = command || 'bin/rails console'
         @wait_timeout = wait_timeout || Consolle::DEFAULT_WAIT_TIMEOUT
+        @mode = mode  # nil means use config file setting
         @server_pid = nil
       end
 
@@ -149,7 +150,8 @@ module Consolle
           @pid_path,
           @log_path,
           @command,
-          @wait_timeout.to_s
+          @wait_timeout.to_s,
+          @mode.to_s  # empty string if nil (use config file)
         ]
       end
 
@@ -159,8 +161,9 @@ module Consolle
             require 'consolle/server/console_socket_server'
             require 'logger'
           #{'  '}
-            socket_path, rails_root, rails_env, log_level, pid_path, log_path, command, wait_timeout_str = ARGV
+            socket_path, rails_root, rails_env, log_level, pid_path, log_path, command, wait_timeout_str, mode_str = ARGV
             wait_timeout = wait_timeout_str ? wait_timeout_str.to_i : nil
+            mode = mode_str && !mode_str.empty? ? mode_str.to_sym : nil  # nil = use config file
           #{'  '}
             # Write initial log
             log_file = log_path || socket_path.sub(/\\.socket$/, '.log')
@@ -191,10 +194,11 @@ module Consolle
               rails_env: rails_env,
               logger: logger,
               command: command,
-              wait_timeout: wait_timeout
+              wait_timeout: wait_timeout,
+              mode: mode
             )
           #{'  '}
-            puts "[Server] Starting server with log level: \#{log_level}..."
+            puts "[Server] Starting server with log level: \#{log_level}, mode: \#{mode || 'config'}..."
             server.start
           #{'  '}
             puts "[Server] Server started, entering sleep..."
@@ -204,17 +208,17 @@ module Consolle
           rescue => e
             puts "[Server] Error: \#{e.class}: \#{e.message}"
             puts e.backtrace.join("\\n")
-            
+
             # Clean up socket file if it exists
             if defined?(socket_path) && socket_path && File.exist?(socket_path)
               File.unlink(socket_path) rescue nil
             end
-            
+
             # Clean up PID file if it exists
             if defined?(pid_file) && pid_file && File.exist?(pid_file)
               File.unlink(pid_file) rescue nil
             end
-            
+
             exit 1
           end
         RUBY

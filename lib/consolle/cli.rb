@@ -124,15 +124,25 @@ module Consolle
         RAILS_ENV=production cone start --target api
         RAILS_ENV=development cone start --target worker
 
-      Custom console commands are supported for special environments:
+      Supervisor modes (--mode):
+        pty         - Traditional PTY-based mode, supports custom commands (default)
+        embed-irb   - Pure IRB embedding, Ruby 3.3+ only
+        embed-rails - Rails console embedding, Ruby 3.3+ only
+
+      Custom console commands are supported for PTY mode:
         cone start --command "kamal app exec -i 'bin/rails console'"
         cone start --command "docker exec -it myapp bin/rails console"
-      
+
       For SSH-based commands that require authentication (e.g., 1Password SSH agent):
         cone start --command "kamal console" --wait-timeout 60
+
+      Use embedded modes for faster local execution (200x faster):
+        cone start --mode embed-rails
+        cone start --mode embed-irb
     LONGDESC
     # Rails environment is now controlled via RAILS_ENV, not a CLI option
-    method_option :command, type: :string, aliases: '-c', desc: 'Custom console command', default: 'bin/rails console'
+    method_option :mode, type: :string, aliases: '-m', desc: 'Supervisor mode: pty, embed-irb, embed-rails'
+    method_option :command, type: :string, aliases: '-c', desc: 'Custom console command (PTY mode only)', default: 'bin/rails console'
     method_option :wait_timeout, type: :numeric, aliases: '-w', desc: 'Timeout for console startup (seconds)', default: Consolle::DEFAULT_WAIT_TIMEOUT
     def start
       ensure_rails_project!
@@ -160,7 +170,13 @@ module Consolle
         clear_session_info
       end
 
-      adapter = create_rails_adapter(current_rails_env, options[:target], options[:command], options[:wait_timeout])
+      adapter = create_rails_adapter(
+        current_rails_env,
+        options[:target],
+        options[:command],
+        options[:wait_timeout],
+        options[:mode]
+      )
 
       puts 'Starting Rails console...'
 
@@ -557,8 +573,8 @@ module Consolle
       if result['success']
         # Always print result, even if empty (multiline code often returns empty string)
         puts result['result'] unless result['result'].nil?
-        # Always show execution time when available
-        puts "Execution time: #{result['execution_time'].round(3)}s" if result['execution_time']
+        # Show execution time only in verbose mode
+        puts "Execution time: #{result['execution_time'].round(3)}s" if options[:verbose] && result['execution_time']
       else
         # Display error information
         if result['error_code']
@@ -574,10 +590,10 @@ module Consolle
         
         puts result['message']
         puts result['backtrace']&.join("\n") if options[:verbose] && result['backtrace']
-        
-        # Show execution time for errors too
-        puts "Execution time: #{result['execution_time'].round(3)}s" if result['execution_time']
-        
+
+        # Show execution time for errors too (verbose only)
+        puts "Execution time: #{result['execution_time'].round(3)}s" if options[:verbose] && result['execution_time']
+
         exit 1
       end
     end
@@ -702,7 +718,7 @@ module Consolle
       File.join(Dir.pwd, 'tmp', 'cone', 'sessions.json')
     end
 
-    def create_rails_adapter(rails_env = 'development', target = nil, command = nil, wait_timeout = nil)
+    def create_rails_adapter(rails_env = 'development', target = nil, command = nil, wait_timeout = nil, mode = nil)
       target ||= options[:target]
 
       Consolle::Adapters::RailsConsole.new(
@@ -713,7 +729,8 @@ module Consolle
         rails_env: rails_env,
         verbose: options[:verbose],
         command: command,
-        wait_timeout: wait_timeout
+        wait_timeout: wait_timeout,
+        mode: mode
       )
     end
 

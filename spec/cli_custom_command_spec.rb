@@ -29,7 +29,8 @@ RSpec.describe Consolle::CLI do
         cli.options = {
           target: 'test',
           command: 'bin/rails console',
-          verbose: false
+          verbose: false,
+          mode: nil
         }
       end
 
@@ -38,7 +39,8 @@ RSpec.describe Consolle::CLI do
           anything,   # rails_env is provided externally; not asserted
           'test',
           'bin/rails console',
-          nil
+          nil,  # wait_timeout
+          nil   # mode
         ).and_return(adapter)
 
         cli.start
@@ -50,7 +52,8 @@ RSpec.describe Consolle::CLI do
         cli.options = {
           target: 'test',
           command: 'bundle exec rails console',
-          verbose: false
+          verbose: false,
+          mode: nil
         }
       end
 
@@ -59,7 +62,8 @@ RSpec.describe Consolle::CLI do
           anything,   # rails_env is provided externally; not asserted
           'test',
           'bundle exec rails console',
-          nil
+          nil,  # wait_timeout
+          nil   # mode
         ).and_return(adapter)
 
         cli.start
@@ -71,7 +75,8 @@ RSpec.describe Consolle::CLI do
         cli.options = {
           target: 'kamal',
           command: 'docker exec -it app-web-123 bin/rails console',
-          verbose: false
+          verbose: false,
+          mode: nil
         }
       end
 
@@ -80,7 +85,8 @@ RSpec.describe Consolle::CLI do
           anything,   # rails_env is provided externally; not asserted
           'kamal',
           'docker exec -it app-web-123 bin/rails console',
-          nil
+          nil,  # wait_timeout
+          nil   # mode
         ).and_return(adapter)
 
         cli.start
@@ -101,11 +107,12 @@ RSpec.describe Consolle::CLI do
         hash_including(
           command: 'custom command',
           rails_env: 'development',
-          verbose: false
+          verbose: false,
+          mode: nil
         )
       )
 
-      cli.send(:create_rails_adapter, 'development', 'test', 'custom command')
+      cli.send(:create_rails_adapter, 'development', 'test', 'custom command', nil, nil)
     end
 
     it 'passes nil command when not provided' do
@@ -113,11 +120,25 @@ RSpec.describe Consolle::CLI do
         hash_including(
           command: nil,
           rails_env: 'development',
-          verbose: false
+          verbose: false,
+          mode: nil
         )
       )
 
-      cli.send(:create_rails_adapter, 'development', 'test', nil)
+      cli.send(:create_rails_adapter, 'development', 'test', nil, nil, nil)
+    end
+
+    it 'passes mode to RailsConsole adapter' do
+      expect(Consolle::Adapters::RailsConsole).to receive(:new).with(
+        hash_including(
+          command: nil,
+          rails_env: 'development',
+          verbose: false,
+          mode: 'embed-rails'
+        )
+      )
+
+      cli.send(:create_rails_adapter, 'development', 'test', nil, nil, 'embed-rails')
     end
   end
 end

@@ -105,7 +105,7 @@ RSpec.describe Consolle::CLI do
       it 'executes code directly without starting server' do
         expect(cli).not_to receive(:invoke).with(:start, [], {})
         expect(cli).to receive(:puts).with('42')
-        expect(cli).to receive(:puts).with(match(/^Execution time: \d+\.\d+s$/))
+        # Execution time is only shown in verbose mode
 
         cli.exec('21 + 21')
       end
