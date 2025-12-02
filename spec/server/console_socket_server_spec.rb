@@ -37,15 +37,16 @@ RSpec.describe Consolle::Server::ConsoleSocketServer do
 
   describe '#start' do
     before do
-      # Mock ConsoleSupervisor creation
+      # Mock SupervisorFactory creation
       supervisor_double = double('ConsoleSupervisor',
                                  running?: true,
                                  stop: true,
                                  eval: { success: true, output: 'result', execution_time: 0.1 },
                                  rails_root: rails_root,
                                  rails_env: 'development',
-                                 pid: 12_345)
-      allow(Consolle::Server::ConsoleSupervisor).to receive(:new).and_return(supervisor_double)
+                                 pid: 12_345,
+                                 mode: :pty)
+      allow(Consolle::Server::SupervisorFactory).to receive(:create).and_return(supervisor_double)
 
       # Mock RequestBroker
       broker_double = double('RequestBroker', start: true, stop: true)
@@ -66,15 +67,16 @@ RSpec.describe Consolle::Server::ConsoleSocketServer do
 
   describe '#stop' do
     before do
-      # Mock ConsoleSupervisor creation
+      # Mock SupervisorFactory creation
       supervisor_double = double('ConsoleSupervisor',
                                  running?: true,
                                  stop: true,
                                  eval: { success: true, output: 'result', execution_time: 0.1 },
                                  rails_root: rails_root,
                                  rails_env: 'development',
-                                 pid: 12_345)
-      allow(Consolle::Server::ConsoleSupervisor).to receive(:new).and_return(supervisor_double)
+                                 pid: 12_345,
+                                 mode: :pty)
+      allow(Consolle::Server::SupervisorFactory).to receive(:create).and_return(supervisor_double)
 
       # Mock RequestBroker
       broker_double = double('RequestBroker', start: true, stop: true)
@@ -94,15 +96,16 @@ RSpec.describe Consolle::Server::ConsoleSocketServer do
 
   describe '#running?' do
     before do
-      # Mock ConsoleSupervisor creation
+      # Mock SupervisorFactory creation
       @supervisor_double = double('ConsoleSupervisor',
                                   running?: true,
                                   stop: true,
                                   eval: { success: true, output: 'result', execution_time: 0.1 },
                                   rails_root: rails_root,
                                   rails_env: 'development',
-                                  pid: 12_345)
-      allow(Consolle::Server::ConsoleSupervisor).to receive(:new).and_return(@supervisor_double)
+                                  pid: 12_345,
+                                  mode: :pty)
+      allow(Consolle::Server::SupervisorFactory).to receive(:create).and_return(@supervisor_double)
 
       # Mock RequestBroker
       broker_double = double('RequestBroker', start: true, stop: true)

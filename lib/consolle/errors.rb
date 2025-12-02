@@ -110,6 +110,20 @@ module Consolle
       end
     end
 
+    # Configuration error
+    class ConfigurationError < Error
+      def initialize(message)
+        super("Configuration error: #{message}")
+      end
+    end
+
+    # Unsupported Ruby version for embedded mode
+    class UnsupportedRubyVersion < Error
+      def initialize(message)
+        super(message)
+      end
+    end
+
     # Error classifier to map exceptions to error codes
     class ErrorClassifier
       ERROR_CODE_MAP = {

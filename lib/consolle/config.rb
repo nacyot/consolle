@@ -14,13 +14,23 @@ module Consolle
     # - Generic prompts: >> or >
     DEFAULT_PROMPT_PATTERN = /^[^\w]*(\u001E\u001F<CONSOLLE>\u001F\u001E|\w+[-_]?\w*\([^)]*\)(:\d+)?>|irb\([^)]+\):\d+:?\d*[>*]|>>|>)\s*$/
 
-    attr_reader :rails_root, :prompt_pattern, :raw_prompt_pattern
+    # Valid supervisor modes
+    # - pty: PTY-based, supports custom command (local/remote)
+    # - embed-irb: Pure IRB embedding (Ruby 3.3+, local only)
+    # - embed-rails: Rails console embedding (Ruby 3.3+, local only)
+    VALID_MODES = %w[pty embed-irb embed-rails].freeze
+    DEFAULT_MODE = :pty
+    DEFAULT_COMMAND = 'bin/rails console'
+
+    attr_reader :rails_root, :prompt_pattern, :raw_prompt_pattern, :mode, :command
 
     def initialize(rails_root)
       @rails_root = rails_root
       @config = load_config
       @raw_prompt_pattern = @config['prompt_pattern']
       @prompt_pattern = parse_prompt_pattern(@raw_prompt_pattern)
+      @mode = parse_mode(@config['mode'])
+      @command = @config['command'] || DEFAULT_COMMAND
     end
 
     def self.load(rails_root)
@@ -73,6 +83,22 @@ module Consolle
         warn "[Consolle] Using default pattern instead."
         DEFAULT_PROMPT_PATTERN
       end
+    end
+
+    def parse_mode(mode_string)
+      return DEFAULT_MODE if mode_string.nil?
+
+      # Normalize: convert underscores/symbols, handle legacy 'embedded' -> 'embed-rails'
+      normalized = mode_string.to_s.downcase.tr('_', '-')
+      normalized = 'embed-rails' if normalized == 'embedded'
+      normalized = 'pty' if normalized == 'auto'
+
+      unless VALID_MODES.include?(normalized)
+        warn "[Consolle] Warning: Invalid mode '#{mode_string}'. Using '#{DEFAULT_MODE}'."
+        return DEFAULT_MODE
+      end
+
+      normalized.tr('-', '_').to_sym  # :pty, :embed_irb, :embed_rails
     end
   end
 end

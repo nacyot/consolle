@@ -300,6 +300,12 @@ module Consolle
         end
       end
 
+      # Returns the mode name for logging/debugging
+      # @return [Symbol] :pty
+      def mode
+        :pty
+      end
+
       # Returns the prompt pattern to use (custom from config or default)
       def prompt_pattern
         @config&.prompt_pattern || Consolle::Config::DEFAULT_PROMPT_PATTERN

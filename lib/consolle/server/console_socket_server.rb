@@ -5,6 +5,8 @@ require 'json'
 require 'logger'
 require 'fileutils'
 require_relative 'console_supervisor'
+require_relative 'embedded_supervisor'
+require_relative 'supervisor_factory'
 require_relative 'request_broker'
 
 module Consolle
@@ -12,14 +14,15 @@ module Consolle
     class ConsoleSocketServer
       attr_reader :socket_path, :logger
 
-      def initialize(socket_path:, rails_root:, rails_env: 'development', logger: nil, command: nil, wait_timeout: nil)
+      def initialize(socket_path:, rails_root:, rails_env: 'development', logger: nil, command: nil, wait_timeout: nil, mode: nil)
         @socket_path = socket_path
         @rails_root = rails_root
         @rails_env = rails_env
         @command = command || 'bin/rails console'
         @wait_timeout = wait_timeout
+        @mode = mode  # nil = use config file, otherwise :pty, :embed_irb, :embed_rails
         @logger = logger || begin
-          log = Logger.new(STDOUT)
+          log = Logger.new($stdout)
           log.level = Logger::DEBUG
           log
         end
@@ -97,13 +100,20 @@ module Consolle
       end
 
       def setup_supervisor
-        @supervisor = ConsoleSupervisor.new(
+        # Load config to get default mode if not explicitly specified
+        config = Consolle::Config.load(@rails_root)
+        effective_mode = @mode || config.mode
+
+        @supervisor = SupervisorFactory.create(
           rails_root: @rails_root,
+          mode: effective_mode,
           rails_env: @rails_env,
           logger: @logger,
           command: @command,
           wait_timeout: @wait_timeout
         )
+
+        @logger.info "[ConsoleSocketServer] Using #{@supervisor.mode} mode"
       end
 
       def setup_broker
