@@ -37,6 +37,46 @@ $ cone stop # 서버 중지
 
 작업을 마치면 반드시 종료해 주세요.
 
+## 실행 모드
+
+Cone은 세 가지 실행 모드를 지원합니다. `--mode` 옵션으로 지정할 수 있습니다.
+
+| 모드 | 설명 | Ruby 요구사항 | 실행 속도 |
+|------|------|--------------|----------|
+| `pty` | PTY 기반, 커스텀 명령어 지원 (기본값) | 모든 버전 | ~0.6s |
+| `embed-rails` | Rails 콘솔 임베딩 | Ruby 3.3+ | ~0.001s |
+| `embed-irb` | 순수 IRB 임베딩 (Rails 미로드) | Ruby 3.3+ | ~0.001s |
+
+```bash
+$ cone start                      # PTY 모드 (기본값)
+$ cone start --mode embed-rails   # Rails 콘솔 임베딩 (200배 빠름)
+$ cone start --mode embed-irb     # 순수 IRB 임베딩 (Rails 없이)
+```
+
+### 모드 선택 기준
+
+- **`pty`**: 원격 환경(SSH, Docker, Kamal)이나 커스텀 명령어가 필요한 경우
+- **`embed-rails`**: 로컬 Rails 개발에서 빠른 실행이 필요한 경우
+- **`embed-irb`**: Rails 없이 순수 Ruby 코드만 실행하는 경우
+
+### 커스텀 명령어 (PTY 모드 전용)
+
+PTY 모드에서는 `--command` 옵션으로 커스텀 콘솔 명령어를 지정할 수 있습니다.
+
+```bash
+$ cone start --command "docker exec -it app bin/rails console"
+$ cone start --command "kamal console" --wait-timeout 60
+```
+
+### 설정 파일
+
+프로젝트 루트에 `.consolle.yml` 파일로 기본 모드를 설정할 수 있습니다. CLI 옵션은 설정 파일보다 우선합니다.
+
+```yaml
+mode: embed-rails
+# command: "bin/rails console"  # PTY 모드 전용
+```
+
 ## Cone 서버 상태 확인
 
 ```bash
@@ -74,10 +114,13 @@ $ cone exec 'puts u'
 $ cone exec -f example.rb
 ```
 
-디버깅을 위한 `-v` 옵션(Verbose 출력)이 제공됩니다.
+디버깅을 위한 `-v` 옵션(Verbose 출력)이 제공됩니다. 실행 시간 및 추가 정보를 표시합니다.
 
 ```bash
 $ cone exec -v 'puts "hello, world"'
+hello, world
+=> nil
+Execution time: 0.001s
 ```
 
 ## 코드 입력 모범 사례

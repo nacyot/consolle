@@ -37,6 +37,46 @@ $ cone stop # Stop server
 
 Always terminate when you finish your work.
 
+## Execution Modes
+
+Cone supports three execution modes. You can specify the mode with the `--mode` option.
+
+| Mode | Description | Ruby Requirement | Execution Speed |
+|------|-------------|-----------------|-----------------|
+| `pty` | PTY-based, supports custom commands (default) | All versions | ~0.6s |
+| `embed-rails` | Rails console embedding | Ruby 3.3+ | ~0.001s |
+| `embed-irb` | Pure IRB embedding (no Rails) | Ruby 3.3+ | ~0.001s |
+
+```bash
+$ cone start                      # PTY mode (default)
+$ cone start --mode embed-rails   # Rails console embedding (200x faster)
+$ cone start --mode embed-irb     # Pure IRB embedding (without Rails)
+```
+
+### Mode Selection Guide
+
+- **`pty`**: For remote environments (SSH, Docker, Kamal) or when custom commands are needed
+- **`embed-rails`**: For local Rails development when fast execution is required
+- **`embed-irb`**: When running pure Ruby code without Rails
+
+### Custom Commands (PTY Mode Only)
+
+In PTY mode, you can specify a custom console command with the `--command` option.
+
+```bash
+$ cone start --command "docker exec -it app bin/rails console"
+$ cone start --command "kamal console" --wait-timeout 60
+```
+
+### Configuration File
+
+You can set the default mode in a `.consolle.yml` file at the project root. CLI options take precedence over the configuration file.
+
+```yaml
+mode: embed-rails
+# command: "bin/rails console"  # PTY mode only
+```
+
 ## Checking Cone Server Status
 
 ```bash
@@ -74,10 +114,13 @@ You can also execute Ruby files directly using the `-f` option. Unlike Rails Run
 $ cone exec -f example.rb
 ```
 
-A `-v` option (Verbose output) is provided for debugging.
+A `-v` option (Verbose output) is provided for debugging. It shows execution time and additional details.
 
 ```bash
 $ cone exec -v 'puts "hello, world"'
+hello, world
+=> nil
+Execution time: 0.001s
 ```
 
 ## Best Practices for Code Input
