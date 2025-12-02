@@ -11,23 +11,30 @@ RSpec.describe Consolle::Server::ConsoleSupervisor do
     let(:rails_root) { temp_dir }
     let(:socket_path) { File.join(temp_dir, 'test.socket') }
     let(:supervisor) do
-      described_class.new(
-        rails_root: rails_root,
-        rails_env: 'test',
-        logger: Logger.new(nil),
-        command: 'ruby -e "require \'irb\'; IRB.start"'
-      )
+      # Use allocate to avoid calling initialize (which calls spawn_console)
+      instance = described_class.allocate
+      instance.instance_variable_set(:@rails_root, rails_root)
+      instance.instance_variable_set(:@rails_env, 'test')
+      instance.instance_variable_set(:@command, 'ruby -e "require \'irb\'; IRB.start"')
+      instance.instance_variable_set(:@logger, Logger.new(nil))
+      instance.instance_variable_set(:@wait_timeout, 25)
+      instance.instance_variable_set(:@config, Consolle::Config.load(rails_root))
+      instance.instance_variable_set(:@running, true)
+      instance.instance_variable_set(:@mutex, Mutex.new)
+      instance.instance_variable_set(:@process_mutex, Mutex.new)
+      instance
     end
 
     before do
-      allow(supervisor).to receive(:spawn_console)
-      allow(supervisor).to receive(:running?).and_return(true)
-      
       # Set up PTY reader/writer for all tests
       @reader = double('reader')
       @writer = double('writer')
       supervisor.instance_variable_set(:@reader, @reader)
       supervisor.instance_variable_set(:@writer, @writer)
+      supervisor.instance_variable_set(:@pid, Process.pid) # Use current process as fake PID
+
+      # Mock running? to always return true for these tests
+      allow(supervisor).to receive(:running?).and_return(true)
     end
 
     after do

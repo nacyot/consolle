@@ -39,6 +39,56 @@ module Consolle
       end
     end
 
+    # Prompt detection failure with diagnostic information
+    class PromptDetectionError < Error
+      attr_reader :received_output, :expected_patterns, :config_path
+
+      def initialize(timeout:, received_output:, expected_patterns:, config_path:)
+        @received_output = received_output
+        @expected_patterns = expected_patterns
+        @config_path = config_path
+
+        super(build_message(timeout))
+      end
+
+      private
+
+      def build_message(timeout)
+        # Extract last line that looks like a prompt (ends with > or similar)
+        lines = @received_output.to_s.lines.map(&:strip).reject(&:empty?)
+        potential_prompt = lines.reverse.find { |l| l.match?(/[>*]\s*$/) } || lines.last
+
+        <<~MSG.strip
+          Prompt not detected after #{timeout} seconds
+
+          Received output:
+            #{@received_output.to_s.lines.last(5).map { |l| l.strip }.join("\n    ")}
+
+          Potential prompt found:
+            #{potential_prompt.inspect}
+
+          #{@expected_patterns}
+
+          To fix this, add to #{@config_path}:
+            prompt_pattern: '#{escape_for_yaml(potential_prompt)}'
+
+          Or set environment variable:
+            CONSOLLE_PROMPT_PATTERN='#{escape_for_yaml(potential_prompt)}' cone start
+        MSG
+      end
+
+      def escape_for_yaml(str)
+        return '' if str.nil?
+        # Escape special regex characters and create a simple pattern
+        str.to_s
+           .gsub(/\e\[[\d;]*[a-zA-Z]/, '') # Remove ANSI codes
+           .gsub(/[\x00-\x1F]/, '')        # Remove control characters
+           .strip
+           .gsub(/(\d+)/, '\d+')           # Replace numbers with \d+
+           .gsub(/([().\[\]{}|*+?^$\\])/, '\\\\\1') # Escape regex special chars
+      end
+    end
+
     # Syntax error in executed code
     class SyntaxError < ExecutionError
       def initialize(message)
@@ -80,7 +130,8 @@ module Consolle
         '::RuntimeError' => 'RUNTIME_ERROR',
         'StandardError' => 'STANDARD_ERROR',
         'Exception' => 'EXCEPTION',
-        'Consolle::Errors::ServerUnhealthy' => 'SERVER_UNHEALTHY'
+        'Consolle::Errors::ServerUnhealthy' => 'SERVER_UNHEALTHY',
+        'Consolle::Errors::PromptDetectionError' => 'PROMPT_DETECTION_ERROR'
       }.freeze
 
       def self.to_code(exception)

@@ -5,6 +5,7 @@ require 'timeout'
 require 'fcntl'
 require 'logger'
 require_relative '../constants'
+require_relative '../config'
 require_relative '../errors'
 
 # Ruby 3.4.0+ extracts base64 as a default gem
@@ -17,15 +18,13 @@ $VERBOSE = original_verbose
 module Consolle
   module Server
     class ConsoleSupervisor
-      attr_reader :pid, :reader, :writer, :rails_root, :rails_env, :logger
+      attr_reader :pid, :reader, :writer, :rails_root, :rails_env, :logger, :config
 
       RESTART_DELAY = 1  # seconds
       MAX_RESTARTS = 5   # within 5 minutes
       RESTART_WINDOW = 300 # 5 minutes
-      # Match various Rails console prompts
-      # Match various console prompts: custom sentinel, Rails app prompts, IRB prompts, and generic prompts
-      # Allow optional non-word characters before the prompt (e.g., Unicode symbols like ▽)
-      PROMPT_PATTERN = /^[^\w]*(\u001E\u001F<CONSOLLE>\u001F\u001E|\w+[-_]?\w*\([^)]*\)>|irb\([^)]+\):\d+:?\d*[>*]|>>|>)\s*$/
+      # Legacy constant for backward compatibility - use config.prompt_pattern instead
+      PROMPT_PATTERN = Consolle::Config::DEFAULT_PROMPT_PATTERN
       CTRL_C = "\x03"
 
       def initialize(rails_root:, rails_env: 'development', logger: nil, command: nil, wait_timeout: nil)
@@ -34,6 +33,7 @@ module Consolle
         @command = command || 'bin/rails console'
         @logger = logger || Logger.new(STDOUT)
         @wait_timeout = wait_timeout || Consolle::DEFAULT_WAIT_TIMEOUT
+        @config = Consolle::Config.load(rails_root)
         @pid = nil
         @reader = nil
         @writer = nil
@@ -227,7 +227,7 @@ module Consolle
 
                 # Check if we got prompt back
                 clean = strip_ansi(output)
-                if clean.match?(PROMPT_PATTERN)
+                if clean.match?(prompt_pattern)
                   # Wait a bit for any trailing output
                   sleep 0.1
                   begin
@@ -298,6 +298,11 @@ module Consolle
         rescue Errno::ESRCH
           false
         end
+      end
+
+      # Returns the prompt pattern to use (custom from config or default)
+      def prompt_pattern
+        @config&.prompt_pattern || Consolle::Config::DEFAULT_PROMPT_PATTERN
       end
 
       def stop
@@ -531,7 +536,16 @@ module Consolle
             logger.error "[ConsoleSupervisor] Timeout reached. Current: #{current_time}, Deadline: #{deadline}, Elapsed: #{current_time - start_time}s"
             logger.error "[ConsoleSupervisor] Output so far: #{output.inspect}"
             logger.error "[ConsoleSupervisor] Stripped: #{strip_ansi(output).inspect}"
-            raise Timeout::Error, "No prompt after #{timeout} seconds"
+
+            # Raise PromptDetectionError with diagnostic information
+            config_path = File.join(@rails_root || '.', Consolle::Config::CONFIG_FILENAME)
+            expected_desc = @config&.prompt_pattern_description || "Default prompt patterns"
+            raise Consolle::Errors::PromptDetectionError.new(
+              timeout: timeout,
+              received_output: strip_ansi(output),
+              expected_patterns: expected_desc,
+              config_path: config_path
+            )
           end
 
           # If we found prompt and consume_all is true, continue reading for a bit more
@@ -560,7 +574,7 @@ module Consolle
             clean = strip_ansi(output)
             # Check each line for prompt pattern
             clean.lines.each do |line|
-              if line.match?(PROMPT_PATTERN)
+              if line.match?(prompt_pattern)
                 logger.info '[ConsoleSupervisor] Found prompt!'
                 prompt_found = true
               end
@@ -647,7 +661,7 @@ module Consolle
         # Wait for prompt after configuration with reasonable timeout
         begin
           wait_for_prompt(timeout: 2, consume_all: false)
-        rescue Timeout::Error
+        rescue Timeout::Error, Consolle::Errors::PromptDetectionError
           # This can fail with some console types, but that's okay
           logger.debug '[ConsoleSupervisor] No prompt after IRB configuration, continuing'
         end
@@ -686,7 +700,7 @@ module Consolle
           end
 
           # Skip prompts (but not return values that start with =>)
-          next if line.match?(PROMPT_PATTERN) && !line.start_with?('=>')
+          next if line.match?(prompt_pattern) && !line.start_with?('=>')
 
           # Skip common IRB configuration output patterns
           if line.match?(/^(IRB\.conf|DISABLE_PRY_RAILS|Switch to inspect mode|Loading .*\.rb|nil)$/) ||

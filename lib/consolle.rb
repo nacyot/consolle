@@ -3,6 +3,7 @@
 require_relative 'consolle/version'
 require_relative 'consolle/constants'
 require_relative 'consolle/errors'
+require_relative 'consolle/config'
 require_relative 'consolle/cli'
 
 # Server components
