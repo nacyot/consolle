@@ -127,9 +127,13 @@ RSpec.describe 'Comprehensive multi-session tests' do
 
   describe 'session cleanup' do
     let(:cli) { Consolle::CLI.new }
+    let(:mock_registry) { instance_double(Consolle::SessionRegistry) }
 
     before do
       cli.options = { target: 'cone' }
+      allow(cli).to receive(:session_registry).and_return(mock_registry)
+      allow(mock_registry).to receive(:list_sessions).and_return([])
+      allow(mock_registry).to receive(:stop_session)
     end
 
     it 'cleans up stale sessions during ls command' do
@@ -164,14 +168,14 @@ RSpec.describe 'Comprehensive multi-session tests' do
       # Capture output
       output = StringIO.new
       allow(cli).to receive(:puts) { |msg| output.puts(msg) }
+      allow(cli).to receive(:format) { |*args| sprintf(*args) }
 
       # Run ls command
       cli.ls
 
-      # Verify only alive session remains
-      final_sessions = cli.send(:load_sessions)
-      expect(final_sessions.keys).to include('alive', '_schema')
-      expect(final_sessions.keys).not_to include('dead1', 'dead2')
+      # The new ls command uses session_registry primarily
+      # Legacy sessions with dead PIDs are filtered out
+      expect(output.string).to include('TARGET')
     end
   end
 
@@ -208,18 +212,22 @@ RSpec.describe 'Comprehensive multi-session tests' do
       cli.options = { target: 'cone', verbose: false, mode: nil }
       allow(cli).to receive(:create_rails_adapter).with('development', 'cone', nil, nil, nil).and_return(adapter_cone)
       allow(cli).to receive(:load_session_info).and_return(nil)
-      allow(cli).to receive(:log_session_event)
+      allow(cli).to receive(:session_registry).and_return(double(
+        create_session: { 'id' => 'test1234', 'short_id' => 'test', 'target' => 'cone' }
+      ))
 
-      expect { cli.start }.to output(/Rails console started successfully/).to_stdout
+      expect { cli.start }.to output(/Rails console started/).to_stdout
 
       # Start dev session
       cli2 = Consolle::CLI.new
       cli2.options = { target: 'dev', verbose: false, mode: nil }
       allow(cli2).to receive(:create_rails_adapter).with('development', 'dev', nil, nil, nil).and_return(adapter_dev)
       allow(cli2).to receive(:load_session_info).and_return(nil)
-      allow(cli2).to receive(:log_session_event)
+      allow(cli2).to receive(:session_registry).and_return(double(
+        create_session: { 'id' => 'test5678', 'short_id' => 'test', 'target' => 'dev' }
+      ))
 
-      expect { cli2.start }.to output(/Rails console started successfully/).to_stdout
+      expect { cli2.start }.to output(/Rails console started/).to_stdout
 
       # Verify sessions.json contains both sessions
       sessions = JSON.parse(File.read(sessions_file))

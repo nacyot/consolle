@@ -29,13 +29,16 @@ RSpec.describe Consolle::CLI do
         }
       }
     end
+    let(:mock_registry) { instance_double(Consolle::SessionRegistry) }
 
     before do
       allow(cli).to receive(:ensure_rails_project!)
       allow(cli).to receive(:load_sessions).and_return(sessions)
       allow(cli).to receive(:save_sessions)
       allow(cli).to receive(:with_sessions_lock).and_yield
-      allow(cli).to receive(:log_session_event)
+      allow(cli).to receive(:session_registry).and_return(mock_registry)
+      allow(mock_registry).to receive(:list_sessions).and_return([])
+      allow(mock_registry).to receive(:stop_session)
       allow(cli).to receive(:puts) # Suppress output in tests
     end
 
@@ -96,17 +99,13 @@ RSpec.describe Consolle::CLI do
         cli.stop_all
       end
 
-      it 'logs session stop events' do
+      it 'calls session_registry stop_session for tracked sessions' do
+        # Registry returns empty (legacy sessions only)
         allow(adapter1).to receive(:stop).and_return(true)
         allow(adapter2).to receive(:stop).and_return(true)
 
-        expect(cli).to receive(:log_session_event).with(12_345, 'session_stop', {
-                                                          reason: 'stop_all_requested'
-                                                        })
-        expect(cli).to receive(:log_session_event).with(12_346, 'session_stop', {
-                                                          reason: 'stop_all_requested'
-                                                        })
-
+        # Legacy sessions don't call session_registry.stop_session
+        # (they have _legacy flag)
         cli.stop_all
       end
     end

@@ -8,6 +8,8 @@ require 'timeout'
 require 'securerandom'
 require 'date'
 require_relative 'constants'
+require_relative 'session_registry'
+require_relative 'history'
 require_relative 'adapters/rails_console'
 
 module Consolle
@@ -88,7 +90,10 @@ module Consolle
           shell.say '  cone status             # Show Rails console status'
           shell.say '  cone exec CODE          # Execute Ruby code in Rails console'
           shell.say '  cone rails SUBCOMMAND   # Rails convenience commands'
-          shell.say '  cone ls                 # List active Rails console sessions'
+          shell.say '  cone ls                 # List active sessions (use -a for all)'
+          shell.say '  cone history            # Show command history'
+          shell.say '  cone rm SESSION         # Remove session and its history'
+          shell.say '  cone prune              # Remove all stopped sessions'
           shell.say '  cone stop_all           # Stop all Rails console sessions'
           shell.say '  cone rule FILE          # Write cone command guide to FILE'
           shell.say '  cone version            # Show version'
@@ -236,18 +241,25 @@ module Consolle
 
       begin
         adapter.start
-        puts '✓ Rails console started successfully'
+
+        # Register session in registry
+        session = session_registry.create_session(
+          target: options[:target],
+          socket_path: adapter.socket_path,
+          pid: adapter.process_pid,
+          rails_env: current_rails_env,
+          mode: options[:mode] || 'pty'
+        )
+
+        puts '✓ Rails console started'
+        puts "  Session ID: #{session['id']} (#{session['short_id']})"
+        puts "  Target: #{session['target']}"
+        puts "  Environment: #{current_rails_env}"
         puts "  PID: #{adapter.process_pid}"
         puts "  Socket: #{adapter.socket_path}"
 
-        # Save session info
-        save_session_info(adapter)
-
-        # Log session start
-        log_session_event(adapter.process_pid, 'session_start', {
-                            rails_env: current_rails_env,
-                            socket_path: adapter.socket_path
-                          })
+        # Also save to legacy sessions.json for backward compatibility
+        save_session_info(adapter, session['id'])
       rescue StandardError => e
         puts "✗ Failed to start Rails console: #{e.message}"
         exit 1
@@ -259,9 +271,11 @@ module Consolle
       ensure_rails_project!
       validate_session_name!(options[:target])
 
+      # Try to find session in registry first
+      session = session_registry.find_running_session(target: options[:target])
       session_info = load_session_info
 
-      if session_info.nil?
+      if session_info.nil? && session.nil?
         puts 'No active Rails console session found'
         return
       end
@@ -278,85 +292,141 @@ module Consolle
       if process_running
         rails_env = server_status['rails_env'] || 'unknown'
         console_pid = server_status['pid'] || 'unknown'
+        uptime = session_info&.dig(:started_at) ? format_uptime(Time.now - Time.at(session_info[:started_at])) : 'unknown'
+        command_count = session ? session['command_count'] : 0
 
         puts '✓ Rails console is running'
-        puts "  PID: #{console_pid}"
+        if session
+          puts "  Session ID: #{session['id']} (#{session['short_id']})"
+        end
+        puts "  Target: #{options[:target]}"
         puts "  Environment: #{rails_env}"
-        puts "  Session: #{session_info[:socket_path]}"
-        puts '  Ready for input: Yes'
+        puts "  PID: #{console_pid}"
+        puts "  Uptime: #{uptime}"
+        puts "  Commands: #{command_count}"
+        puts "  Socket: #{session_info&.dig(:socket_path) || session&.dig('socket_path')}"
       else
         puts '✗ Rails console is not running'
+        # Mark session as stopped in registry
+        session_registry.stop_session(target: options[:target], reason: 'process_died') if session
         clear_session_info
       end
     end
 
-    desc 'ls', 'List active Rails console sessions'
+    desc 'ls', 'List Rails console sessions'
     long_desc <<-LONGDESC
-      Lists all active Rails console sessions in the current project.
+      Lists Rails console sessions in the current project.
+
+      By default, shows only active (running) sessions.
+      Use -a/--all to include stopped sessions.
 
       Shows information about each session including:
-      - Session name (target)
-      - Process ID (PID)
+      - Session ID (short)
+      - Target name
       - Rails environment
       - Status (running/stopped)
+      - Uptime or stop time
+      - Command count
 
       Example output:
-        Active sessions:
-        - cone (default)  [PID: 12345, ENV: development, STATUS: running]
-        - api             [PID: 12346, ENV: production, STATUS: running]
-        - worker          [PID: 12347, ENV: development, STATUS: stopped]
+        ID       TARGET   ENV          STATUS    UPTIME    COMMANDS
+        a1b2     cone     development  running   2h 15m    42
+        e5f6     api      production   running   1h 30m    15
     LONGDESC
+    method_option :all, type: :boolean, aliases: '-a', desc: 'Include stopped sessions'
     def ls
       ensure_rails_project!
 
-      sessions = load_sessions
+      include_stopped = options[:all]
+      sessions = session_registry.list_sessions(include_stopped: include_stopped)
 
-      if sessions.empty? || sessions.size == 1 && sessions.key?('_schema')
-        puts 'No active sessions'
+      # Also check legacy sessions.json for backward compatibility
+      legacy_sessions = load_sessions
+      legacy_sessions.each do |name, info|
+        next if name == '_schema'
+        next unless info['process_pid'] && process_alive?(info['process_pid'])
+
+        # Check if already in registry
+        existing = sessions.find { |s| s['target'] == name && s['status'] == 'running' }
+        next if existing
+
+        # Add legacy session (will be migrated on next start)
+        sessions << {
+          'short_id' => '----',
+          'target' => name,
+          'rails_env' => 'development',
+          'status' => 'running',
+          'pid' => info['process_pid'],
+          'created_at' => info['started_at'] ? Time.at(info['started_at']).iso8601 : Time.now.iso8601,
+          'command_count' => 0,
+          '_legacy' => true
+        }
+      end
+
+      if sessions.empty?
+        if include_stopped
+          puts 'No sessions found'
+        else
+          puts 'No active sessions'
+          puts "Use 'cone ls -a' to see stopped sessions"
+        end
         return
       end
 
-      active_sessions = []
-      stale_sessions = []
+      # Verify running sessions are actually running
+      sessions.each do |session|
+        next unless session['status'] == 'running'
+        next if session['_legacy']
 
-      sessions.each do |name, info|
-        next if name == '_schema' # Skip schema field
-
-        # Check if process is alive
-        if info['process_pid'] && process_alive?(info['process_pid'])
-          # Try to get server status
-      adapter = create_rails_adapter(current_rails_env, name)
-          server_status = begin
-            adapter.get_status
-          rescue StandardError
-            nil
-          end
-
-          if server_status && server_status['success'] && server_status['running']
-            rails_env = server_status['rails_env'] || 'development'
-            console_pid = server_status['pid'] || info['process_pid']
-            active_sessions << "#{name} (#{rails_env}) - PID: #{console_pid}"
-          else
-            stale_sessions << name
-          end
-        else
-          stale_sessions << name
+        unless session['pid'] && process_alive?(session['pid'])
+          session_registry.stop_session(session_id: session['id'], reason: 'process_died')
+          session['status'] = 'stopped'
         end
       end
 
-      # Clean up stale sessions
-      if stale_sessions.any?
-        with_sessions_lock do
-          sessions = load_sessions
-          stale_sessions.each { |name| sessions.delete(name) }
-          save_sessions(sessions)
-        end
-      end
+      # Re-filter if needed
+      sessions = sessions.select { |s| s['status'] == 'running' } unless include_stopped
 
-      if active_sessions.empty?
+      if sessions.empty?
         puts 'No active sessions'
+        puts "Use 'cone ls -a' to see stopped sessions"
+        return
+      end
+
+      # Display header
+      if include_stopped
+        puts 'ALL SESSIONS:'
       else
-        active_sessions.each { |session| puts session }
+        puts 'ACTIVE SESSIONS:'
+      end
+      puts
+      puts format('  %-8s %-12s %-12s %-9s %-10s %s', 'ID', 'TARGET', 'ENV', 'STATUS', 'UPTIME', 'COMMANDS')
+
+      sessions.each do |session|
+        short_id = session['short_id'] || session['id']&.[](0, 4) || '----'
+        target = session['target'] || 'unknown'
+        env = session['rails_env'] || 'dev'
+        status = session['status'] || 'unknown'
+        commands = session['command_count'] || 0
+
+        if session['status'] == 'running'
+          started = session['started_at'] || session['created_at']
+          uptime = started ? format_uptime(Time.now - Time.parse(started)) : '---'
+        else
+          stopped = session['stopped_at']
+          uptime = stopped ? format_time_ago(Time.now - Time.parse(stopped)) : '---'
+        end
+
+        puts format('  %-8s %-12s %-12s %-9s %-10s %d', short_id, target, env, status, uptime, commands)
+      end
+
+      puts
+      if include_stopped
+        puts "Use 'cone history --session ID' to view session history"
+        puts "Use 'cone rm ID' to remove session and history"
+      else
+        puts 'Usage: cone exec -t TARGET CODE'
+        puts '       cone exec --session ID CODE'
       end
     end
 
@@ -373,18 +443,15 @@ module Consolle
         if adapter.stop
           puts '✓ Rails console stopped'
 
-          # Log session stop
-          session_info = load_session_info
-          if session_info && session_info[:process_pid]
-            log_session_event(session_info[:process_pid], 'session_stop', {
-                                reason: 'user_requested'
-                              })
-          end
+          # Mark session as stopped in registry (preserves history)
+          session_registry.stop_session(target: options[:target], reason: 'user_requested')
         else
           puts '✗ Failed to stop Rails console'
         end
       else
         puts 'Rails console is not running'
+        # Mark as stopped anyway in case registry is out of sync
+        session_registry.stop_session(target: options[:target], reason: 'not_running')
       end
 
       clear_session_info
@@ -395,27 +462,31 @@ module Consolle
     def stop_all
       ensure_rails_project!
 
-      sessions = load_sessions
-      active_sessions = []
+      # Get running sessions from registry
+      running_sessions = session_registry.list_sessions(include_stopped: false)
 
-      # Filter active sessions (excluding schema)
-      sessions.each do |name, info|
+      # Also check legacy sessions
+      legacy_sessions = load_sessions
+      legacy_sessions.each do |name, info|
         next if name == '_schema'
+        next unless info['process_pid'] && process_alive?(info['process_pid'])
 
-        active_sessions << { name: name, info: info } if info['process_pid'] && process_alive?(info['process_pid'])
+        existing = running_sessions.find { |s| s['target'] == name }
+        next if existing
+
+        running_sessions << { 'target' => name, 'pid' => info['process_pid'], '_legacy' => true }
       end
 
-      if active_sessions.empty?
+      if running_sessions.empty?
         puts 'No active sessions to stop'
         return
       end
 
-      puts "Found #{active_sessions.size} active session(s)"
+      puts "Found #{running_sessions.size} active session(s)"
 
       # Stop each active session
-      active_sessions.each do |session|
-        name = session[:name]
-        info = session[:info]
+      running_sessions.each do |session|
+        name = session['target']
 
         puts "\nStopping session '#{name}'..."
 
@@ -424,14 +495,10 @@ module Consolle
         if adapter.stop
           puts "✓ Session '#{name}' stopped"
 
-          # Log session stop
-          if info['process_pid']
-            log_session_event(info['process_pid'], 'session_stop', {
-                                reason: 'stop_all_requested'
-                              })
-          end
+          # Mark session as stopped in registry
+          session_registry.stop_session(target: name, reason: 'stop_all_requested') unless session['_legacy']
 
-          # Clear session info
+          # Clear from legacy sessions.json
           with_sessions_lock do
             sessions = load_sessions
             sessions.delete(name)
@@ -652,6 +719,211 @@ module Consolle
       end
     end
 
+    desc 'rm SESSION_ID', 'Remove session and its history'
+    long_desc <<-LONGDESC
+      Removes a stopped session and all its history.
+
+      The SESSION_ID can be:
+      - Full session ID (8 characters, e.g., a1b2c3d4)
+      - Short session ID (4 characters, e.g., a1b2)
+      - Target name (e.g., cone, api)
+
+      Running sessions cannot be removed. Stop them first with 'cone stop -t TARGET'.
+
+      Use -f/--force to skip confirmation prompt.
+      Use -f/--force with a running session to stop and remove it.
+
+      Examples:
+        cone rm a1b2              # Remove by short ID
+        cone rm a1b2c3d4          # Remove by full ID
+        cone rm -f a1b2           # Remove without confirmation
+    LONGDESC
+    method_option :force, type: :boolean, aliases: '-f', desc: 'Skip confirmation (or force stop running session)'
+    def rm(session_id)
+      ensure_rails_project!
+
+      # Try to find session
+      session = session_registry.find_session(session_id: session_id) ||
+                session_registry.find_session(target: session_id)
+
+      unless session
+        puts "✗ Session not found: #{session_id}"
+        puts "Use 'cone ls -a' to see all sessions"
+        exit 1
+      end
+
+      # Check if running
+      if session['status'] == 'running'
+        if options[:force]
+          # Force stop first
+          puts "Stopping running session '#{session['target']}'..."
+          adapter = create_rails_adapter('development', session['target'])
+          adapter.stop
+          session_registry.stop_session(session_id: session['id'], reason: 'force_remove')
+          clear_session_info if options[:target] == session['target']
+        else
+          puts "✗ Session #{session['short_id']} (#{session['target']}) is still running"
+          puts "  Use 'cone stop -t #{session['target']}' first, or 'cone rm -f #{session_id}' to force"
+          exit 1
+        end
+      end
+
+      # Confirm deletion
+      unless options[:force]
+        command_count = session['command_count'] || 0
+        print "Remove session #{session['id']} (#{session['target']}, #{command_count} commands)?\n"
+        print 'This will permanently delete all history. [y/N]: '
+        response = $stdin.gets&.strip&.downcase
+        unless response == 'y' || response == 'yes'
+          puts 'Cancelled'
+          return
+        end
+      end
+
+      # Remove session
+      result = session_registry.remove_session(session_id: session['id'])
+
+      if result && !result.is_a?(Hash)
+        puts "✓ Session #{session['id']} removed"
+      else
+        puts "✗ Failed to remove session"
+        exit 1
+      end
+    end
+
+    desc 'prune', 'Remove all stopped sessions'
+    long_desc <<-LONGDESC
+      Removes all stopped sessions and their history.
+
+      By default, only removes sessions from the current project.
+
+      Use --yes to skip confirmation prompt.
+
+      Examples:
+        cone prune                # Remove stopped sessions (with confirmation)
+        cone prune --yes          # Remove without confirmation
+    LONGDESC
+    method_option :yes, type: :boolean, aliases: '-y', desc: 'Skip confirmation'
+    def prune
+      ensure_rails_project!
+
+      stopped = session_registry.list_stopped_sessions
+
+      if stopped.empty?
+        puts 'No stopped sessions to remove'
+        return
+      end
+
+      # Show what will be removed
+      total_commands = stopped.sum { |s| s['command_count'] || 0 }
+
+      puts "Found #{stopped.size} stopped session(s):"
+      stopped.each do |session|
+        stopped_at = session['stopped_at'] ? Time.parse(session['stopped_at']).strftime('%Y-%m-%d') : '---'
+        commands = session['command_count'] || 0
+        puts "  #{session['short_id']}  #{session['target'].ljust(12)} stopped #{stopped_at}  #{commands} commands"
+      end
+      puts
+
+      # Confirm
+      unless options[:yes]
+        print "Remove all stopped sessions and their history? [y/N]: "
+        response = $stdin.gets&.strip&.downcase
+        unless response == 'y' || response == 'yes'
+          puts 'Cancelled'
+          return
+        end
+      end
+
+      # Remove all stopped sessions
+      removed = session_registry.prune_sessions
+
+      puts "✓ Removed #{removed.size} sessions (#{total_commands} commands)"
+    end
+
+    desc 'history', 'Show command history'
+    long_desc <<-LONGDESC
+      Shows command history for sessions.
+
+      By default, shows history from the current active session (target).
+
+      Options:
+        --session ID    Show history for specific session (by ID or short ID)
+        -t, --target    Show history for specific target name
+        -n, --limit     Limit number of entries shown
+        --today         Show only today's commands
+        --date DATE     Show commands from specific date (YYYY-MM-DD)
+        --success       Show only successful commands
+        --failed        Show only failed commands
+        --grep PATTERN  Filter by code or result matching pattern
+        --all           Include history from stopped sessions with same target
+        -v, --verbose   Show detailed output
+        --json          Output as JSON
+
+      Examples:
+        cone history                    # Current session history
+        cone history -t api             # History for 'api' target
+        cone history --session a1b2     # History for specific session
+        cone history -n 10              # Last 10 commands
+        cone history --today            # Today's commands only
+        cone history --failed           # Failed commands only
+        cone history --grep User        # Filter by pattern
+    LONGDESC
+    method_option :session, type: :string, aliases: '-s', desc: 'Session ID or short ID'
+    method_option :limit, type: :numeric, aliases: '-n', desc: 'Limit number of entries'
+    method_option :today, type: :boolean, desc: 'Show only today'
+    method_option :date, type: :string, desc: 'Show specific date (YYYY-MM-DD)'
+    method_option :success, type: :boolean, desc: 'Show only successful commands'
+    method_option :failed, type: :boolean, desc: 'Show only failed commands'
+    method_option :grep, type: :string, aliases: '-g', desc: 'Filter by pattern'
+    method_option :all, type: :boolean, desc: 'Include stopped sessions'
+    method_option :json, type: :boolean, desc: 'Output as JSON'
+    def history
+      ensure_rails_project!
+
+      history_manager = Consolle::History.new
+
+      entries = history_manager.query(
+        session_id: options[:session],
+        target: options[:target],
+        limit: options[:limit],
+        today: options[:today],
+        date: options[:date],
+        success_only: options[:success],
+        failed_only: options[:failed],
+        grep: options[:grep],
+        all_sessions: options[:all]
+      )
+
+      if entries.empty?
+        puts 'No history found'
+        if options[:session] || options[:target]
+          puts "Try 'cone history' without filters to see all history"
+        else
+          puts "Execute some commands first with 'cone exec'"
+        end
+        return
+      end
+
+      if options[:json]
+        puts history_manager.format_json(entries)
+      elsif options[:verbose]
+        entries.each do |entry|
+          puts history_manager.format_entry_verbose(entry)
+          puts
+        end
+      else
+        entries.each do |entry|
+          puts history_manager.format_entry(entry)
+          puts
+        end
+      end
+
+      unless options[:json]
+        puts "Showing #{entries.size} entries"
+      end
+    end
+
     private
 
     def current_rails_env
@@ -788,7 +1060,7 @@ module Consolle
       )
     end
 
-    def save_session_info(adapter)
+    def save_session_info(adapter, session_id = nil)
       target = options[:target]
 
       with_sessions_lock do
@@ -800,7 +1072,8 @@ module Consolle
           'pid_path' => project_pid_path(target),
           'log_path' => project_log_path(target),
           'started_at' => Time.now.to_f,
-          'rails_root' => Dir.pwd
+          'rails_root' => Dir.pwd,
+          'session_id' => session_id
         }
 
         save_sessions(sessions)
@@ -821,7 +1094,8 @@ module Consolle
         socket_path: session['socket_path'],
         process_pid: session['process_pid'],
         started_at: session['started_at'],
-        rails_root: session['rails_root']
+        rails_root: session['rails_root'],
+        session_id: session['session_id']
       }
     end
 
@@ -836,47 +1110,44 @@ module Consolle
     end
 
     def log_session_activity(process_pid, code, result)
-      # Create log filename based on date and PID
-      log_file = File.join(project_session_dir, "session_#{Date.today.strftime('%Y%m%d')}_pid#{process_pid}.log")
+      # Try to use new History class if session_id is available
+      session_info = load_session_info
+      if session_info&.dig(:session_id)
+        history_manager = Consolle::History.new
+        history_manager.log_command(
+          session_id: session_info[:session_id],
+          target: options[:target],
+          code: code,
+          result: result
+        )
+      else
+        # Fallback to legacy logging
+        log_file = File.join(project_session_dir, "session_#{Date.today.strftime('%Y%m%d')}_pid#{process_pid}.log")
 
-      # Create log entry
-      log_entry = {
-        timestamp: Time.now.iso8601,
-        request_id: result['request_id'],
-        code: code,
-        success: result['success'],
-        result: result['result'],
-        error: result['error'],
-        message: result['message'],
-        execution_time: result['execution_time']
-      }
+        log_entry = {
+          timestamp: Time.now.iso8601,
+          target: options[:target],
+          request_id: result['request_id'],
+          code: code,
+          success: result['success'],
+          result: result['result'],
+          error: result['error'],
+          message: result['message'],
+          execution_time: result['execution_time']
+        }
 
-      # Append to log file
-      File.open(log_file, 'a') do |f|
-        f.puts JSON.generate(log_entry)
+        File.open(log_file, 'a') do |f|
+          f.puts JSON.generate(log_entry)
+        end
       end
     rescue StandardError => e
       # Log errors should not crash the command
       puts "Warning: Failed to log session activity: #{e.message}" if options[:verbose]
     end
 
-    def log_session_event(process_pid, event_type, details = {})
-      # Create log filename based on date and PID
-      log_file = File.join(project_session_dir, "session_#{Date.today.strftime('%Y%m%d')}_pid#{process_pid}.log")
-
-      # Create log entry
-      log_entry = {
-        timestamp: Time.now.iso8601,
-        event: event_type
-      }.merge(details)
-
-      # Append to log file
-      File.open(log_file, 'a') do |f|
-        f.puts JSON.generate(log_entry)
-      end
-    rescue StandardError => e
-      # Log errors should not crash the command
-      puts "Warning: Failed to log session event: #{e.message}" if options[:verbose]
+    def log_session_event(_process_pid, _event_type, _details = {})
+      # Legacy method kept for backward compatibility with tests
+      # Session events are now tracked in registry metadata
     end
 
     def load_sessions
@@ -954,6 +1225,41 @@ module Consolle
         yield
       ensure
         f.flock(File::LOCK_UN)
+      end
+    end
+
+    def session_registry
+      @session_registry ||= Consolle::SessionRegistry.new
+    end
+
+    def format_uptime(seconds)
+      seconds = seconds.to_i
+      if seconds < 60
+        "#{seconds}s"
+      elsif seconds < 3600
+        "#{seconds / 60}m #{seconds % 60}s"
+      elsif seconds < 86400
+        hours = seconds / 3600
+        mins = (seconds % 3600) / 60
+        "#{hours}h #{mins}m"
+      else
+        days = seconds / 86400
+        hours = (seconds % 86400) / 3600
+        "#{days}d #{hours}h"
+      end
+    end
+
+    def format_time_ago(seconds)
+      seconds = seconds.to_i
+      if seconds < 60
+        'just now'
+      elsif seconds < 3600
+        "#{seconds / 60}m ago"
+      elsif seconds < 86400
+        "#{seconds / 3600}h ago"
+      else
+        days = seconds / 86400
+        "#{days}d ago"
       end
     end
 
