@@ -8,6 +8,15 @@ Rails console과 마찬가지로 세션 내에서 실행한 결과는 유지되�
 
 사용 전에는 `status`로 상태를 확인하고, 작업 종료 후에는 `stop`해야 합니다.
 
+## 설치 참고사항
+
+Gemfile이 있는 프로젝트에서는 `bundle exec`를 사용하는 것이 좋습니다:
+
+```bash
+$ bundle exec cone start
+$ bundle exec cone exec 'User.count'
+```
+
 ## Cone의 용도
 
 Cone은 디버깅, 데이터 탐색, 그리고 개발 보조 도구로 사용됩니다.
@@ -27,15 +36,72 @@ $ cone start # 서버 시작 (RAILS_ENV가 없으면 development)
 $ RAILS_ENV=test cone start # test 환경에서 console 시작
 ```
 
+시작 시 고유한 Session ID를 포함한 세션 정보가 표시됩니다:
+
+```bash
+$ cone start
+✓ Rails console started
+  Session ID: a1b2c3d4 (a1b2)
+  Target: cone
+  Environment: development
+  PID: 12345
+  Socket: /path/to/cone.socket
+```
+
 중지와 재시작 명령어도 제공합니다.
 
-Cone은 한 번에 하나의 세션만 제공하며, 실행 환경을 변경하려면 반드시 중지 후 재시작해야 합니다.
+Cone은 타겟당 한 번에 하나의 세션만 제공하며, 실행 환경을 변경하려면 반드시 중지 후 재시작해야 합니다.
 
 ```bash
 $ cone stop # 서버 중지
 ```
 
 작업을 마치면 반드시 종료해 주세요.
+
+## 세션 관리
+
+### 세션 목록 보기
+
+```bash
+$ cone ls                    # 활성 세션만 표시
+$ cone ls -a                 # 종료된 세션 포함 전체 표시
+```
+
+출력 예시:
+```
+ACTIVE SESSIONS:
+
+  ID       TARGET       ENV          STATUS    UPTIME     COMMANDS
+  a1b2     cone         development  running   2h 15m     42
+  e5f6     api          production   running   1h 30m     15
+
+Usage: cone exec -t TARGET CODE
+       cone exec --session ID CODE
+```
+
+### 세션 히스토리
+
+세션별 명령어 히스토리를 조회합니다:
+
+```bash
+$ cone history                    # 현재 세션 히스토리
+$ cone history -t api             # 'api' 타겟의 히스토리
+$ cone history --session a1b2     # 특정 세션 ID의 히스토리
+$ cone history -n 10              # 최근 10개 명령어
+$ cone history --today            # 오늘 실행한 명령어만
+$ cone history --failed           # 실패한 명령어만
+$ cone history --grep User        # 패턴으로 필터링
+$ cone history --json             # JSON 형식으로 출력
+```
+
+### 세션 삭제
+
+```bash
+$ cone rm a1b2                    # 종료된 세션 ID로 삭제
+$ cone rm -f a1b2                 # 강제 삭제 (실행 중이면 중지 후 삭제)
+$ cone prune                      # 종료된 모든 세션 삭제
+$ cone prune --yes                # 확인 없이 삭제
+```
 
 ## 실행 모드
 
@@ -82,10 +148,13 @@ mode: embed-rails
 ```bash
 $ cone status
 ✓ Rails console is running
-  PID: 36384
-  Environment: test
-  Session: /Users/ben/syncthing/workspace/karrot-inhouse/ehr/tmp/cone/cone.socket
-  Ready for input: Yes
+  Session ID: a1b2c3d4 (a1b2)
+  Target: cone
+  Environment: development
+  PID: 12345
+  Uptime: 2h 15m
+  Commands: 42
+  Socket: /path/to/cone.socket
 ```
 
 ## 코드 실행

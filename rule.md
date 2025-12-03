@@ -8,6 +8,15 @@ Similar to Rails console, results executed within the session are maintained and
 
 Before use, check the status with `status`, and after finishing work, you should `stop` it.
 
+## Installation Note
+
+For projects with a Gemfile, it's recommended to use `bundle exec`:
+
+```bash
+$ bundle exec cone start
+$ bundle exec cone exec 'User.count'
+```
+
 ## Purpose of Cone
 
 Cone is used for debugging, data exploration, and as a development assistant tool.
@@ -27,15 +36,72 @@ $ cone start # Start server (uses RAILS_ENV or defaults to development)
 $ RAILS_ENV=test cone start # Start console in test environment
 ```
 
+When started, cone displays session information including a unique Session ID:
+
+```bash
+$ cone start
+✓ Rails console started
+  Session ID: a1b2c3d4 (a1b2)
+  Target: cone
+  Environment: development
+  PID: 12345
+  Socket: /path/to/cone.socket
+```
+
 It also provides stop and restart commands.
 
-Cone provides only one session at a time, and to change the execution environment, you must stop and restart.
+Cone provides only one session at a time per target, and to change the execution environment, you must stop and restart.
 
 ```bash
 $ cone stop # Stop server
 ```
 
 Always terminate when you finish your work.
+
+## Session Management
+
+### Listing Sessions
+
+```bash
+$ cone ls                    # Show active sessions only
+$ cone ls -a                 # Show all sessions including stopped ones
+```
+
+Example output:
+```
+ACTIVE SESSIONS:
+
+  ID       TARGET       ENV          STATUS    UPTIME     COMMANDS
+  a1b2     cone         development  running   2h 15m     42
+  e5f6     api          production   running   1h 30m     15
+
+Usage: cone exec -t TARGET CODE
+       cone exec --session ID CODE
+```
+
+### Session History
+
+View command history for sessions:
+
+```bash
+$ cone history                    # Current session history
+$ cone history -t api             # History for 'api' target
+$ cone history --session a1b2     # History for specific session ID
+$ cone history -n 10              # Last 10 commands
+$ cone history --today            # Today's commands only
+$ cone history --failed           # Failed commands only
+$ cone history --grep User        # Filter by pattern
+$ cone history --json             # Output as JSON
+```
+
+### Removing Sessions
+
+```bash
+$ cone rm a1b2                    # Remove stopped session by ID
+$ cone rm -f a1b2                 # Force remove (stops if running)
+$ cone prune                      # Remove all stopped sessions
+$ cone prune --yes                # Remove without confirmation
+```
 
 ## Execution Modes
 
@@ -82,10 +148,13 @@ mode: embed-rails
 ```bash
 $ cone status
 ✓ Rails console is running
-  PID: 36384
-  Environment: test
-  Session: /Users/ben/syncthing/workspace/karrot-inhouse/ehr/tmp/cone/cone.socket
-  Ready for input: Yes
+  Session ID: a1b2c3d4 (a1b2)
+  Target: cone
+  Environment: development
+  PID: 12345
+  Uptime: 2h 15m
+  Commands: 42
+  Socket: /path/to/cone.socket
 ```
 
 ## Executing Code
