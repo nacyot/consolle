@@ -123,6 +123,25 @@ hello, world
 Execution time: 0.001s
 ```
 
+## Rails 편의 명령어
+
+자주 사용하는 Rails 작업을 위한 편의 명령어를 제공합니다:
+
+```bash
+$ cone rails env      # 현재 Rails 환경 확인
+=> "development"
+
+$ cone rails reload   # 애플리케이션 코드 리로드 (reload!)
+Reloading...
+=> true
+
+$ cone rails db       # 데이터베이스 연결 정보 확인
+Adapter:  postgresql
+Database: myapp_development
+Host:     localhost
+Connected: true
+```
+
 ## 코드 입력 모범 사례
 
 ### 홑따옴표 사용 (강력 권장)

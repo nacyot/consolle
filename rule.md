@@ -123,6 +123,25 @@ hello, world
 Execution time: 0.001s
 ```
 
+## Rails Convenience Commands
+
+Cone provides convenience commands for common Rails operations:
+
+```bash
+$ cone rails env      # Show current Rails environment
+=> "development"
+
+$ cone rails reload   # Reload application code (reload!)
+Reloading...
+=> true
+
+$ cone rails db       # Show database connection information
+Adapter:  postgresql
+Database: myapp_development
+Host:     localhost
+Connected: true
+```
+
 ## Best Practices for Code Input
 
 ### Using Single Quotes (Strongly Recommended)
