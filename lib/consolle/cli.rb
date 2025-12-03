@@ -11,6 +11,55 @@ require_relative 'constants'
 require_relative 'adapters/rails_console'
 
 module Consolle
+  # Rails convenience commands subcommand
+  class RailsCommands < Thor
+    namespace :rails
+
+    class_option :verbose, type: :boolean, aliases: '-v', desc: 'Verbose output'
+    class_option :target, type: :string, aliases: '-t', desc: 'Target session name', default: 'cone'
+
+    desc 'reload', 'Reload Rails application code (reload!)'
+    def reload
+      execute_rails_code('reload!')
+    end
+
+    desc 'env', 'Show current Rails environment'
+    def env
+      execute_rails_code('Rails.env')
+    end
+
+    desc 'db', 'Show database connection information'
+    def db
+      code = <<~RUBY
+        config = ActiveRecord::Base.connection_db_config
+        puts "Adapter:  \#{config.adapter}"
+        puts "Database: \#{config.database}"
+        puts "Host:     \#{config.host || 'localhost'}" if config.respond_to?(:host)
+        puts "Pool:     \#{config.pool}" if config.respond_to?(:pool)
+        puts "Connected: \#{ActiveRecord::Base.connected?}"
+        nil
+      RUBY
+      execute_rails_code(code)
+    end
+
+    private
+
+    def execute_rails_code(code)
+      # Delegate to main CLI's exec command
+      cli = Consolle::CLI.new
+      cli.options = {
+        target: options[:target] || 'cone',
+        verbose: options[:verbose] || false,
+        timeout: 60,
+        raw: false
+      }
+      cli.exec(code)
+    rescue SystemExit
+      # Allow exit from exec
+      raise
+    end
+  end
+
   class CLI < Thor
     package_name 'Consolle'
 
@@ -38,6 +87,7 @@ module Consolle
           shell.say '  cone restart            # Restart Rails console'
           shell.say '  cone status             # Show Rails console status'
           shell.say '  cone exec CODE          # Execute Ruby code in Rails console'
+          shell.say '  cone rails SUBCOMMAND   # Rails convenience commands'
           shell.say '  cone ls                 # List active Rails console sessions'
           shell.say '  cone stop_all           # Stop all Rails console sessions'
           shell.say '  cone rule FILE          # Write cone command guide to FILE'
@@ -65,6 +115,10 @@ module Consolle
 
     class_option :verbose, type: :boolean, aliases: '-v', desc: 'Verbose output'
     class_option :target, type: :string, aliases: '-t', desc: 'Target session name', default: 'cone'
+
+    # Register rails subcommand
+    desc 'rails SUBCOMMAND', 'Rails convenience commands (reload, env, db)'
+    subcommand 'rails', RailsCommands
 
     def self.exit_on_failure?
       true
